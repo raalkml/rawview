@@ -289,9 +289,13 @@ int main(int argc, char *argv[])
 	char *title = RAWVIEW;
 	int opt;
 	long long start_offset = 0;
+	static int autoscroll;
 
-	while ((opt = getopt(argc, argv, "hDO:")) != -1)
+	while ((opt = getopt(argc, argv, "hDO:A")) != -1)
 		switch (opt) {
+		case 'A':
+			++autoscroll;
+			break;
 		case 'D':
 			++debug;
 			break;
@@ -351,11 +355,21 @@ int main(int argc, char *argv[])
 	}
 
 	int timeout = -1;
+
+	if (autoscroll)
+		timeout = 50;
+
 	while (nfds > 0) {
 		int n = poll(fds, nfds, timeout);
 
-		if (n <= 0)
+		if (n <= 0) {
+			if (autoscroll && n == 0 && in->amount >= in->input_size) {
+				in->input_offset += in->input_size;
+				start_redraw(in, view);
+				nfds = 2;
+			}
 			continue;
+		}
 		if (fds[0].revents & (POLLHUP|POLLNVAL))
 			break;
 		if (fds[0].revents & POLLIN) {
@@ -417,8 +431,10 @@ int main(int argc, char *argv[])
 				continue;
 			}
 			ssize_t rd = read_input(in, view, in->input_size - in->amount);
-			if (rd <= 0)
+			if (rd <= 0) {
 				nfds = 1;
+				autoscroll = 0;
+			}
 		}
 	}
 	free(view);
