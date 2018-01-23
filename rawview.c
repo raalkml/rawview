@@ -9,8 +9,32 @@
 #include <poll.h>
 #include <getopt.h>
 #include <xcb/xcb_ewmh.h>
+#include "utils.h"
 #include "rawview.h"
 
+struct input
+{
+	struct poll_fd pfd;
+	off_t input_offset;
+	size_t input_size;
+	size_t amount;
+	size_t bufsize;
+	uint8_t buf[BUFSIZ];
+};
+
+struct rawview
+{
+	xcb_connection_t *connection;
+	struct window *view;
+	struct input in;
+	struct poll_fd pfd;
+
+	char *title;
+	unsigned autoscroll:1;
+	unsigned seekable:1;
+};
+
+static struct rawview prg;
 static int debug;
 
 static inline int trace(const char *fmt, ...)
@@ -143,19 +167,9 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 	}
 }
 
-struct input
-{
-	int fd;
-	off_t input_offset;
-	size_t input_size;
-	size_t amount;
-	size_t bufsize;
-	uint8_t buf[0];
-};
-
 static ssize_t read_input(struct input *in, struct window *view, size_t count)
 {
-	ssize_t rd = read(in->fd, in->buf, count < in->bufsize ? count : in->bufsize);
+	ssize_t rd = read(in->pfd.fd, in->buf, count < in->bufsize ? count : in->bufsize);
 	trace("%ld %s\n", (long)rd, rd < 0 ? strerror(errno) : "");
 	if (rd > 0)
 		in->amount += rd;
@@ -190,6 +204,7 @@ static ssize_t read_input(struct input *in, struct window *view, size_t count)
 #define DO_XCB_RIGHT	(1 << 4)
 #define DO_XCB_PLUS	(1 << 5)
 #define DO_XCB_MINUS	(1 << 6)
+#define DO_XCB_SPACE	(1 << 7)
 static uint32_t do_xcb_events(xcb_connection_t *connection, struct window *view)
 {
 	xcb_generic_event_t *event;
@@ -216,6 +231,9 @@ static uint32_t do_xcb_events(xcb_connection_t *connection, struct window *view)
 					case 0x18 /* Q */:
 					case 0x09 /* Esc */:
 						ret |= DO_XCB_QUIT;
+						break;
+					case 0x41 /* Space */:
+						ret |= DO_XCB_SPACE;
 						break;
 					case 0x72: /* Right */
 						ret |= DO_XCB_RIGHT;
@@ -286,32 +304,133 @@ fail:
 	return c;
 }
 
-static void start_redraw(struct input *in, struct window *view)
+static void start_redraw(struct rawview *prg)
 {
-	in->amount = 0;
-	lseek(in->fd, in->input_offset, SEEK_SET);
-	xcb_clear_area(view->c, 1, view->w, 0, 0,
-		       view->size.width, view->size.height);
+	prg->in.amount = 0;
+	if (prg->seekable &&
+	    lseek(prg->in.pfd.fd, prg->in.input_offset, SEEK_SET) == -1 && ESPIPE == errno)
+		prg->seekable = 0;
+	xcb_clear_area(prg->view->c, 1, prg->view->w,
+		       0, 0, prg->view->size.width, prg->view->size.height);
 }
+
+static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
+{
+	struct rawview *prg = container_of(pfd, struct rawview, pfd);
+	unsigned ret;
+
+	if (pfd->revents & (POLLHUP|POLLNVAL)) {
+		remove_poll(pctx, pfd);
+		return;
+	}
+	if (!(pfd->revents & POLLIN))
+		return;
+
+	ret = do_xcb_events(prg->connection, prg->view);
+	if (ret & DO_XCB_QUIT) {
+		xcb_disconnect(prg->connection);
+		remove_poll(pctx, pfd);
+	}
+	if (ret & DO_XCB_EXPOSE) {
+		/* start reading stdin on first expose event */
+		static int exposed;
+		if (!exposed) {
+			exposed = 1;
+			add_poll(pctx, &prg->in.pfd);
+		}
+	}
+	if (ret & (DO_XCB_RIGHT|DO_XCB_SPACE)) {
+		prg->in.input_offset += prg->in.input_size;
+		start_redraw(prg);
+		add_poll(pctx, &prg->in.pfd);
+	} else if (prg->seekable && (ret & DO_XCB_LEFT)) {
+		if (prg->in.input_offset > prg->in.input_size)
+			prg->in.input_offset -= prg->in.input_size;
+		else
+			prg->in.input_offset = 0;
+		start_redraw(prg);
+		add_poll(pctx, &prg->in.pfd);
+	} else if (ret & DO_XCB_PLUS) {
+		prg->in.input_size += 1024;
+		prg->in.amount = 0;
+		if (prg->seekable) {
+			if (lseek(prg->in.pfd.fd, prg->in.input_offset, SEEK_SET) == -1 &&
+			    ESPIPE == errno)
+				prg->seekable = 0;
+		}
+		add_poll(pctx, &prg->in.pfd);
+	} else if (ret & DO_XCB_MINUS) {
+		if (prg->in.input_size > 1024)
+			prg->in.input_size -= 1024;
+		else
+			prg->in.input_size = 1024;
+		start_redraw(prg);
+		add_poll(pctx, &prg->in.pfd);
+	}
+	if (prg->seekable && (ret & DO_XCB_RESTART)) {
+		prg->in.input_offset = 0;
+		start_redraw(prg);
+		add_poll(pctx, &prg->in.pfd);
+	}
+}
+
+static void pfd_input_proc(struct poll_context *pctx, struct poll_fd *pfd)
+{
+	struct input *in = container_of(pfd, struct input, pfd);
+	struct rawview *prg = container_of(in, struct rawview, in);
+
+	if (pfd->revents & (POLLHUP|POLLNVAL)) {
+		remove_poll(pctx, pfd);
+		return;
+	}
+	if (!(pfd->revents & POLLIN))
+		return;
+	if (in->amount >= in->input_size) {
+		remove_poll(pctx, pfd);
+		return;
+	}
+	ssize_t rd = read_input(in, prg->view, in->input_size - in->amount);
+	if (rd <= 0) {
+		remove_poll(pctx, pfd);
+		prg->autoscroll = 0;
+	}
+}
+
+static char RAWVIEW[] = "rawview";
+static struct rawview prg = {
+	.pfd = {
+		.events = POLLIN,
+		.proc = pfd_xcb_proc,
+	},
+	.in = {
+		.pfd = {
+			.fd = STDIN_FILENO,
+			.events = POLLIN,
+			.proc = pfd_input_proc,
+		},
+		.input_offset = 0,
+		.input_size = 1024,
+		.bufsize = sizeof(prg.in.buf),
+	},
+	.title = RAWVIEW,
+	.autoscroll = 0,
+	.seekable = 1,
+};
 
 int main(int argc, char *argv[])
 {
-	static char RAWVIEW[] = "rawview";
-	char *title = RAWVIEW;
 	int opt;
-	long long start_offset = 0;
-	static int autoscroll;
 
 	while ((opt = getopt(argc, argv, "hDO:A")) != -1)
 		switch (opt) {
 		case 'A':
-			++autoscroll;
+			prg.autoscroll = 1;
 			break;
 		case 'D':
 			++debug;
 			break;
 		case 'O':
-			start_offset = strtoll(optarg, NULL, 0);
+			prg.in.input_offset = strtoll(optarg, NULL, 0);
 			break;
 		case 'h':
 			break;
@@ -322,132 +441,60 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "rawview: %s: %s\n", argv[optind], strerror(errno));
 			exit(2);
 		}
-		dup2(fd, STDIN_FILENO);
+		if (dup2(fd, STDIN_FILENO) < 0) {
+			fprintf(stderr, "rawview: %s(%d->%d): %s\n", argv[optind],
+				fd, STDIN_FILENO, strerror(errno));
+			exit(2);
+		}
 		close(fd);
 		size_t size = strlen(RAWVIEW) + strlen(argv[optind]) + 32;
-		title = malloc(size);
-		snprintf(title, size, "%s: %s: (conti)", RAWVIEW, argv[optind]);
+		prg.title = malloc(size);
+		snprintf(prg.title, size, "%s: %s: (conti)", RAWVIEW, argv[optind]);
 	}
 
-	xcb_connection_t *connection = connect_x_server();
-	if (!connection) {
+	prg.connection = connect_x_server();
+	if (!prg.connection) {
 		fprintf(stderr, "Cannot connect to DISPLAY\n");
 		exit(2);
 	}
-
-	struct window *view = create_rawview_window(connection, title, NULL);
-	if (!view) {
+	prg.view = create_rawview_window(prg.connection, prg.title, NULL);
+	if (!prg.view) {
 		fprintf(stderr, "out of memory\n");
 		exit(2);
 	}
 
 	/* map the window on the screen */
-	xcb_map_window(connection, view->w);
-	xcb_flush(connection);
+	xcb_map_window(prg.connection, prg.view->w);
+	xcb_flush(prg.connection);
 
-	struct pollfd fds[2];
-	nfds_t nfds = 1;
+	static struct poll_context pollctx = { 0, };
+	prg.pfd.fd = xcb_get_file_descriptor(prg.connection);
+	add_poll(&pollctx, &prg.pfd);
 
-	fds[0].fd = xcb_get_file_descriptor(connection);
-	fds[0].events = POLLIN;
-	fds[1].fd = STDIN_FILENO;
-	fds[1].events = POLLIN;
-	fds[1].revents = 0;
-
-	struct input *in = malloc(sizeof(*in) + 4096);
-	in->fd = STDIN_FILENO;
-	in->input_offset = start_offset;
-	in->input_size = 4096;
-	in->amount = 0;
-	in->bufsize = 4096;
-	if (lseek(in->fd, in->input_offset, SEEK_SET) == -1) {
-		in->input_offset = 0;
+	if (prg.in.input_offset &&
+	    prg.seekable &&
+	    lseek(prg.in.pfd.fd, prg.in.input_offset, SEEK_SET) == -1) {
+		prg.in.input_offset = 0;
+		prg.seekable = 0;
 		fprintf(stderr, "lseek: %s\n", strerror(errno));
 	}
 
 	int timeout = -1;
 
-	if (autoscroll)
+	if (prg.autoscroll)
 		timeout = 50;
 
-	while (nfds > 0) {
-		int n = poll(fds, nfds, timeout);
-
+	while (pollctx.npolls) {
+		int n = poll_fds(&pollctx, timeout);
 		if (n <= 0) {
-			if (autoscroll && n == 0 && in->amount >= in->input_size) {
-				in->input_offset += in->input_size;
-				start_redraw(in, view);
-				nfds = 2;
-			}
-			continue;
-		}
-		if (fds[0].revents & (POLLHUP|POLLNVAL))
-			break;
-		if (fds[0].revents & POLLIN) {
-			unsigned ret = do_xcb_events(connection, view);
-			if (ret & DO_XCB_QUIT) {
-				xcb_disconnect(connection);
-				break;
-			}
-			if (ret & DO_XCB_EXPOSE) {
-				/* start reading stdin on first expose event */
-				static int exposed;
-				if (!exposed)
-					exposed = nfds = 2;
-			}
-			if (ret & DO_XCB_RIGHT) {
-				in->input_offset += in->input_size;
-				start_redraw(in, view);
-				nfds = 2;
-				fds[1].revents |= POLLIN;
-			} else if (ret & DO_XCB_LEFT) {
-				if (in->input_offset > in->input_size)
-					in->input_offset -= in->input_size;
-				else
-					in->input_offset = 0;
-				start_redraw(in, view);
-				nfds = 2;
-				fds[1].revents |= POLLIN;
-			} else if (ret & DO_XCB_PLUS) {
-				in->input_size += 1024;
-				in->amount = 0;
-				lseek(in->fd, in->input_offset, SEEK_SET);
-				nfds = 2;
-				fds[1].revents |= POLLIN;
-			} else if (ret & DO_XCB_MINUS) {
-				if (in->input_size > 1024)
-					in->input_size -= 1024;
-				else
-					in->input_size = 1024;
-				start_redraw(in, view);
-				nfds = 2;
-				fds[1].revents |= POLLIN;
-			}
-			if (ret & DO_XCB_RESTART) {
-				in->input_offset = 0;
-				start_redraw(in, view);
-				nfds = 2;
-				fds[1].revents |= POLLIN;
-			}
-		}
-		if (nfds == 1)
-			continue;
-		if (fds[1].revents & (POLLHUP|POLLNVAL)) {
-			nfds = 1;
-			continue;
-		}
-		if (fds[1].revents & POLLIN) {
-			if (in->amount >= in->input_size) {
-				nfds = 1;
-				continue;
-			}
-			ssize_t rd = read_input(in, view, in->input_size - in->amount);
-			if (rd <= 0) {
-				nfds = 1;
-				autoscroll = 0;
+			if (prg.autoscroll &&
+			    n == 0 &&
+			    prg.in.amount >= prg.in.input_size) {
+				prg.in.input_offset += prg.in.input_size;
+				start_redraw(&prg);
+				add_poll(&pollctx, &prg.in.pfd);
 			}
 		}
 	}
-	free(view);
 	return 0;
 }

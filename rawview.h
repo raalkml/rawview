@@ -3,8 +3,10 @@
 
 #include <xcb/xcb.h>
 #include <xcb/xcb_atom.h>
+#include "poll-fds.h"
 
-struct window {
+struct window
+{
 	xcb_connection_t *c;
 	xcb_window_t w;
 	xcb_gcontext_t fg;
