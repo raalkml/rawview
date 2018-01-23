@@ -8,6 +8,7 @@ struct window {
 	xcb_connection_t *c;
 	xcb_window_t w;
 	xcb_gcontext_t fg;
+	xcb_rectangle_t size;
 };
 
 struct well_known_atom

@@ -3,34 +3,11 @@
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
+#include <getopt.h>
 #include <xcb/xcb_ewmh.h>
 #include "rawview.h"
-
-/* geometric objects */
-static const xcb_point_t          points[] = {
-	{10, 10},
-	{10, 20},
-	{20, 10},
-	{20, 20}};
-
-static const xcb_point_t          polyline[] = {
-	{50, 10},
-	{ 5, 20},     /* rest of points are relative */
-	{25,-20},
-	{10, 10}};
-
-static const xcb_segment_t        segments[] = {
-	{100, 10, 140, 30},
-	{110, 25, 130, 60}};
-
-static const xcb_rectangle_t      rectangles[] = {
-	{ 10, 50, 40, 20},
-	{ 80, 50, 10, 40}};
-
-static const xcb_arc_t arcs[] = {
-	{10, 100, 60, 40, 0, 90 << 6},
-	{90, 100, 55, 40, 0, 270 << 6}};
 
 static struct window *create_rawview_window(xcb_connection_t *c, const char *title, const char *icon)
 {
@@ -40,6 +17,10 @@ static struct window *create_rawview_window(xcb_connection_t *c, const char *tit
 		goto fail;
 
 	view->c = c;
+	view->size.x = 0;
+	view->size.y = 0;
+	view->size.width = 300;
+	view->size.height = 300;
 	/* get the first screen */
 	xcb_screen_t *screen = xcb_setup_roots_iterator(xcb_get_setup(c)).data;
 
@@ -61,8 +42,8 @@ static struct window *create_rawview_window(xcb_connection_t *c, const char *tit
 			  XCB_COPY_FROM_PARENT,	/* depth */
 			  view->w,
 			  screen->root,		/* parent window */
-			  0, 0,			/* x, y */
-			  300, 300,		/* width, height */
+			  view->size.x, view->size.y,
+			  view->size.width, view->size.height,
 			  2,			/* border_width */
 			  XCB_WINDOW_CLASS_INPUT_OUTPUT, /* class */
 			  screen->root_visual,	/* visual */
@@ -106,17 +87,13 @@ static void expose_view(struct window *view)
 	*/
 }
 
-static ssize_t read_input(int fd, struct window *view)
+static void analyze(struct window *view, uint8_t buf[], size_t count)
 {
-	static uint8_t buf[BUFSIZ];
 	static xcb_point_t pts[BUFSIZ];
-	ssize_t rd = read(fd, buf, BUFSIZ);
-	//fprintf(stderr, "%ld %s\n", (long)rd, rd < 0 ? strerror(errno) : "");
-	if (rd <= 0 || rd == 1)
-		return rd;
+
 	//xcb_set_clip_rectangles(view->c, XCB_CLIP_ORDERING_UNSORTED, view->fg, 5, 5, 0, NULL);
 	unsigned i, o = 0;
-	for (i = 1; i < (unsigned)rd; ++i) {
+	for (i = 1; i < count; ++i) {
 		pts[o].x = buf[i - 1];
 		pts[o].y = buf[i];
 		pts[o].x += 5;
@@ -130,13 +107,36 @@ static ssize_t read_input(int fd, struct window *view)
 		xcb_poly_point(view->c, XCB_COORD_MODE_ORIGIN, view->w, view->fg, o, pts);
 	}
 	xcb_flush(view->c);
-	//usleep(100000);
+}
+
+struct input
+{
+	int fd;
+	off_t input_offset;
+	size_t input_size;
+	size_t amount;
+	void *buf;
+	size_t bufsize;
+};
+
+static ssize_t read_input(struct input *in, struct window *view, size_t count)
+{
+	if (!in->buf)
+		in->buf = malloc(in->bufsize);
+	ssize_t rd = read(in->fd, in->buf, count < in->bufsize ? count : in->bufsize);
+	//fprintf(stderr, "%ld %s\n", (long)rd, rd < 0 ? strerror(errno) : "");
+	if (rd <= 0 || rd == 1)
+		return rd;
+	analyze(view, in->buf, rd);
 	return rd;
 }
 
-#define DO_XCB_EXPOSE (1 << 0)
-#define DO_XCB_QUIT   (1 << 1)
-static unsigned do_xcb_events(xcb_connection_t *connection, struct window *view)
+#define DO_XCB_EXPOSE	(1 << 0)
+#define DO_XCB_QUIT	(1 << 1)
+#define DO_XCB_RESTART	(1 << 2)
+#define DO_XCB_LEFT	(1 << 3)
+#define DO_XCB_RIGHT	(1 << 4)
+static uint32_t do_xcb_events(xcb_connection_t *connection, struct window *view)
 {
 	xcb_generic_event_t *event;
 	unsigned ret = 0;
@@ -156,6 +156,21 @@ static unsigned do_xcb_events(xcb_connection_t *connection, struct window *view)
 				    (key->detail == 0x18 /* Q */ || key->detail == 0x09 /* Esc */)) {
 					xcb_disconnect(connection);
 					ret |= DO_XCB_QUIT;
+					break;
+				}
+				if ((event->response_type & ~0x80) == XCB_KEY_RELEASE &&
+				    (key->detail == 0x1b /* R */ || key->detail == 0x47 /* F5 */)) {
+					ret |= DO_XCB_RESTART;
+					break;
+				}
+				if ((event->response_type & ~0x80) == XCB_KEY_PRESS &&
+				    (key->detail == 0x72 /* Right */)) {
+					ret |= DO_XCB_RIGHT;
+					break;
+				}
+				if ((event->response_type & ~0x80) == XCB_KEY_PRESS &&
+				    (key->detail == 0x71 /* Left */)) {
+					ret |= DO_XCB_LEFT;
 					break;
 				}
 				fprintf(stderr, "key %s: 0x%02x mod 0x%x\n",
@@ -211,13 +226,35 @@ fail:
 
 int main(int argc, char *argv[])
 {
+	static char RAWVIEW[] = "rawview";
+	char *title = RAWVIEW;
+	int opt;
+
+	while ((opt = getopt(argc, argv, "h")) != -1)
+		switch (opt) {
+		case 'h':
+			break;
+		}
+	if (optind < argc) {
+		int fd = open(argv[optind], O_RDONLY);
+		if (fd < 0) {
+			fprintf(stderr, "rawview: %s: %s\n", argv[optind], strerror(errno));
+			exit(2);
+		}
+		dup2(fd, STDIN_FILENO);
+		close(fd);
+		size_t size = strlen(RAWVIEW) + strlen(argv[optind]) + 32;
+		title = malloc(size);
+		snprintf(title, size, "%s: %s: (conti)", RAWVIEW, argv[optind]);
+	}
+
 	xcb_connection_t *connection = connect_x_server();
 	if (!connection) {
 		fprintf(stderr, "Cannot connect to DISPLAY\n");
 		exit(2);
 	}
 
-	struct window *view = create_rawview_window(connection, "rawview", NULL);
+	struct window *view = create_rawview_window(connection, title, NULL);
 	if (!view) {
 		fprintf(stderr, "out of memory\n");
 		exit(2);
@@ -234,9 +271,19 @@ int main(int argc, char *argv[])
 	fds[0].events = POLLIN;
 	fds[1].fd = STDIN_FILENO;
 	fds[1].events = POLLIN;
+	fds[1].revents = 0;
 
+	struct input in;
+	in.fd = STDIN_FILENO;
+	in.input_offset = 0;
+	in.input_size = BUFSIZ;
+	in.amount = 0;
+	in.buf = NULL;
+	in.bufsize = BUFSIZ;
+
+	int timeout = -1;
 	while (nfds > 0) {
-		int n = poll(fds, nfds, -1);
+		int n = poll(fds, nfds, timeout);
 
 		if (n <= 0)
 			continue;
@@ -244,16 +291,59 @@ int main(int argc, char *argv[])
 			break;
 		if (fds[0].revents & POLLIN) {
 			unsigned ret = do_xcb_events(connection, view);
-			if (ret & DO_XCB_EXPOSE)
+			if (ret & DO_XCB_EXPOSE) {
+				/* start reading stdin on first expose event */
+				static int exposed;
+				if (!exposed)
+					exposed = nfds = 2;
+			}
+			if (ret & DO_XCB_RIGHT) {
+				in.input_offset += in.input_size;
+				in.amount = 0;
+				lseek(in.fd, in.input_offset, SEEK_SET);
+				xcb_clear_area(view->c, 1, view->w, 0, 0,
+					       view->size.width, view->size.height);
 				nfds = 2;
+				fds[1].revents |= POLLIN;
+			}
+			else if (ret & DO_XCB_LEFT) {
+				in.amount = 0;
+				if (in.input_offset > in.input_size)
+					in.input_offset -= in.input_size;
+				else
+					in.input_offset = 0;
+				lseek(in.fd, in.input_offset, SEEK_SET);
+				xcb_clear_area(view->c, 1, view->w, 0, 0,
+					       view->size.width, view->size.height);
+				nfds = 2;
+				fds[1].revents |= POLLIN;
+			}
+			if (ret & DO_XCB_RESTART) {
+				in.amount = 0;
+				in.input_offset = 0;
+				lseek(in.fd, 0, SEEK_SET);
+				xcb_clear_area(view->c, 1, view->w, 0, 0,
+					       view->size.width, view->size.height);
+				nfds = 2;
+				fds[1].revents |= POLLIN;
+			}
 		}
+		if (nfds == 1)
+			continue;
 		if (fds[1].revents & (POLLHUP|POLLNVAL)) {
 			nfds = 1;
 			continue;
 		}
 		if (fds[1].revents & POLLIN) {
-			if (read_input(fds[1].fd, view) <= 0)
+			if (in.amount >= in.input_size) {
 				nfds = 1;
+				continue;
+			}
+			ssize_t rd = read_input(&in, view, in.input_size - in.amount);
+			if (rd <= 0)
+				nfds = 1;
+			if (rd > 0)
+				in.amount += rd;
 		}
 	}
 	free(view);
