@@ -8,6 +8,8 @@ struct window {
 	xcb_connection_t *c;
 	xcb_window_t w;
 	xcb_gcontext_t fg;
+	xcb_gcontext_t graph;
+	xcb_rectangle_t graph_area;
 	xcb_font_t font;
 	xcb_rectangle_t size;
 };

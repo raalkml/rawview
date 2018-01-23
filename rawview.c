@@ -48,11 +48,25 @@ static struct window *create_rawview_window(xcb_connection_t *c, const char *tit
 
 	/* Create foreground graphic context */
 	uint32_t mask      = XCB_GC_FOREGROUND | XCB_GC_FONT | XCB_GC_GRAPHICS_EXPOSURES;
-	uint32_t values[4] = { screen->white_pixel, view->font, 0 };
+	uint32_t values[5] = { screen->white_pixel, view->font, 0 };
 
+	/* full window GC */
 	view->fg = xcb_generate_id(view->c);
 	xcb_create_gc(view->c, view->fg, screen->root, mask, values);
 	xcb_close_font(view->c, view->font);
+
+	/* graph GC */
+	mask = XCB_GC_FOREGROUND |XCB_GC_BACKGROUND | XCB_GC_GRAPHICS_EXPOSURES;
+	values[0] = screen->white_pixel;
+	values[1] = screen->black_pixel;
+	values[2] = 0;
+	view->graph = xcb_generate_id(view->c);
+	view->graph_area.x = 5;
+	view->graph_area.y = 5;
+	view->graph_area.width = 256;
+	view->graph_area.height = 256;
+	xcb_create_gc(view->c, view->graph, screen->root, mask, values);
+	xcb_set_clip_rectangles(view->c, XCB_CLIP_ORDERING_UNSORTED, view->graph, 0, 0, 1, &view->graph_area);
 
 	view->w = xcb_generate_id(view->c);
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_BORDER_PIXEL | XCB_CW_EVENT_MASK;
@@ -115,20 +129,17 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 {
 	static xcb_point_t pts[BUFSIZ];
 
-	//xcb_set_clip_rectangles(view->c, XCB_CLIP_ORDERING_UNSORTED, view->fg, 5, 5, 0, NULL);
 	unsigned i, o = 0;
 	for (i = 1; i < count; ++i) {
-		pts[o].x = buf[i - 1];
-		pts[o].y = buf[i];
-		pts[o].x += 5;
-		pts[o].y += 5;
+		pts[o].x = buf[i - 1] + view->graph_area.x;
+		pts[o].y = buf[i] + view->graph_area.y;
 		if (++o > BUFSIZ-1) {
-			xcb_poly_point(view->c, XCB_COORD_MODE_ORIGIN, view->w, view->fg, o, pts);
+			xcb_poly_point(view->c, XCB_COORD_MODE_ORIGIN, view->w, view->graph, o, pts);
 			o = 0;
 		}
 	}
 	if (o) {
-		xcb_poly_point(view->c, XCB_COORD_MODE_ORIGIN, view->w, view->fg, o, pts);
+		xcb_poly_point(view->c, XCB_COORD_MODE_ORIGIN, view->w, view->graph, o, pts);
 	}
 }
 
