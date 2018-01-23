@@ -9,6 +9,7 @@
 #include <xcb/xcb_ewmh.h>
 #include "rawview.h"
 
+static int debug;
 static const char font_name[] = "fixed";
 
 static struct window *create_rawview_window(xcb_connection_t *c, const char *title, const char *icon)
@@ -180,18 +181,16 @@ static uint32_t do_xcb_events(xcb_connection_t *connection, struct window *view)
 			{
 				xcb_key_press_event_t *key = (xcb_key_press_event_t *)event;
 				if ((event->response_type & ~0x80) == XCB_KEY_RELEASE &&
-				    (key->detail == 0x18 /* Q */ || key->detail == 0x09 /* Esc */)) {
-					xcb_disconnect(connection);
-					ret |= DO_XCB_QUIT;
-					break;
-				}
-				if ((event->response_type & ~0x80) == XCB_KEY_RELEASE &&
 				    (key->detail == 0x1b /* R */ || key->detail == 0x47 /* F5 */)) {
 					ret |= DO_XCB_RESTART;
 					break;
 				}
 				if ((event->response_type & ~0x80) == XCB_KEY_PRESS) {
 					switch (key->detail) {
+					case 0x18 /* Q */:
+					case 0x09 /* Esc */:
+						ret |= DO_XCB_QUIT;
+						break;
 					case 0x72: /* Right */
 						ret |= DO_XCB_RIGHT;
 						break;
@@ -210,6 +209,7 @@ static uint32_t do_xcb_events(xcb_connection_t *connection, struct window *view)
 					break;
 				}
 				dump_key:
+				if (debug)
 				fprintf(stderr, "key %s: 0x%02x mod 0x%x\n",
 					(event->response_type & ~0x80) == XCB_KEY_PRESS ?
 					"press" : "release",
@@ -275,8 +275,11 @@ int main(int argc, char *argv[])
 	char *title = RAWVIEW;
 	int opt;
 
-	while ((opt = getopt(argc, argv, "h")) != -1)
+	while ((opt = getopt(argc, argv, "hD")) != -1)
 		switch (opt) {
+		case 'D':
+			++debug;
+			break;
 		case 'h':
 			break;
 		}
@@ -335,6 +338,10 @@ int main(int argc, char *argv[])
 			break;
 		if (fds[0].revents & POLLIN) {
 			unsigned ret = do_xcb_events(connection, view);
+			if (ret & DO_XCB_QUIT) {
+				xcb_disconnect(connection);
+				break;
+			}
 			if (ret & DO_XCB_EXPOSE) {
 				/* start reading stdin on first expose event */
 				static int exposed;
