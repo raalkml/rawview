@@ -341,7 +341,8 @@ int main(int argc, char *argv[])
 				fds[1].revents |= POLLIN;
 			} else if (ret & DO_XCB_PLUS) {
 				in->input_size += 1024;
-				start_redraw(in, view);
+				in->amount = 0;
+				lseek(in->fd, in->input_offset, SEEK_SET);
 				nfds = 2;
 				fds[1].revents |= POLLIN;
 			} else if (ret & DO_XCB_MINUS) {
