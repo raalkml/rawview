@@ -9,6 +9,8 @@
 #include <xcb/xcb_ewmh.h>
 #include "rawview.h"
 
+static const char font_name[] = "fixed";
+
 static struct window *create_rawview_window(xcb_connection_t *c, const char *title, const char *icon)
 {
 	struct window *view = calloc(1, sizeof(*view));
@@ -21,15 +23,21 @@ static struct window *create_rawview_window(xcb_connection_t *c, const char *tit
 	view->size.y = 0;
 	view->size.width = 300;
 	view->size.height = 300;
+
 	/* get the first screen */
 	xcb_screen_t *screen = xcb_setup_roots_iterator(xcb_get_setup(c)).data;
 
-	/* Create black (foreground) graphic context */
-	view->fg = xcb_generate_id(view->c);
-	uint32_t mask      = XCB_GC_FOREGROUND | XCB_GC_GRAPHICS_EXPOSURES;
-	uint32_t values[3] = { screen->white_pixel, 0 };
+	view->font = xcb_generate_id(view->c);
+	xcb_open_font(view->c, view->font, strlen(font_name), font_name);
 
+	/* Create foreground graphic context */
+	uint32_t mask      = XCB_GC_FOREGROUND | XCB_GC_FONT | XCB_GC_GRAPHICS_EXPOSURES;
+	uint32_t values[4] = { screen->white_pixel, view->font, 0 };
+
+	view->fg = xcb_generate_id(view->c);
 	xcb_create_gc(view->c, view->fg, screen->root, mask, values);
+	xcb_close_font(view->c, view->font);
+
 	view->w = xcb_generate_id(view->c);
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_BORDER_PIXEL | XCB_CW_EVENT_MASK;
 	values[0] = screen->black_pixel;
@@ -106,7 +114,6 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 	if (o) {
 		xcb_poly_point(view->c, XCB_COORD_MODE_ORIGIN, view->w, view->fg, o, pts);
 	}
-	xcb_flush(view->c);
 }
 
 struct input
@@ -125,9 +132,14 @@ static ssize_t read_input(struct input *in, struct window *view, size_t count)
 		in->buf = malloc(in->bufsize);
 	ssize_t rd = read(in->fd, in->buf, count < in->bufsize ? count : in->bufsize);
 	//fprintf(stderr, "%ld %s\n", (long)rd, rd < 0 ? strerror(errno) : "");
-	if (rd <= 0 || rd == 1)
-		return rd;
-	analyze(view, in->buf, rd);
+	if (rd > 0)
+		in->amount += rd;
+	if (rd > 1)
+		analyze(view, in->buf, rd);
+	char s[100];
+	int len = snprintf(s, sizeof(s), "%lld (%lu)", (long long)in->input_offset, (unsigned long)in->amount);
+	xcb_image_text_8(view->c, len, view->w, view->fg, 5, 5 + 256 + 12, s);
+	xcb_flush(view->c);
 	return rd;
 }
 
@@ -342,8 +354,6 @@ int main(int argc, char *argv[])
 			ssize_t rd = read_input(&in, view, in.input_size - in.amount);
 			if (rd <= 0)
 				nfds = 1;
-			if (rd > 0)
-				in.amount += rd;
 		}
 	}
 	free(view);
