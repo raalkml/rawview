@@ -135,7 +135,22 @@ static ssize_t read_input(struct input *in, struct window *view, size_t count)
 	if (rd > 1)
 		analyze(view, in->buf, rd);
 	char s[100];
-	int len = snprintf(s, sizeof(s), "%lld (%lu)", (long long)in->input_offset, (unsigned long)in->amount);
+	int len = snprintf(s, sizeof(s),
+			   in->amount != in->input_size ?
+			   "%lld (%lu/%lu)" : "%lld (%lu)",
+			   (long long)in->input_offset,
+			   (unsigned long)in->amount,
+			   (unsigned long)in->input_size);
+	xcb_rectangle_t clr = {
+		.x = 0,
+		.y = 5 + 256,
+		.width = view->size.width,
+		.height = view->size.height - 5 - 256,
+	};
+	xcb_clear_area(view->c, 0, view->w,
+		       clr.x, clr.y,
+		       clr.width,
+		       clr.height);
 	xcb_image_text_8(view->c, len, view->w, view->fg, 5, 5 + 256 + 12, s);
 	xcb_flush(view->c);
 	return rd;
