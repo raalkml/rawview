@@ -122,14 +122,12 @@ struct input
 	off_t input_offset;
 	size_t input_size;
 	size_t amount;
-	void *buf;
 	size_t bufsize;
+	uint8_t buf[0];
 };
 
 static ssize_t read_input(struct input *in, struct window *view, size_t count)
 {
-	if (!in->buf)
-		in->buf = malloc(in->bufsize);
 	ssize_t rd = read(in->fd, in->buf, count < in->bufsize ? count : in->bufsize);
 	//fprintf(stderr, "%ld %s\n", (long)rd, rd < 0 ? strerror(errno) : "");
 	if (rd > 0)
@@ -148,6 +146,8 @@ static ssize_t read_input(struct input *in, struct window *view, size_t count)
 #define DO_XCB_RESTART	(1 << 2)
 #define DO_XCB_LEFT	(1 << 3)
 #define DO_XCB_RIGHT	(1 << 4)
+#define DO_XCB_PLUS	(1 << 5)
+#define DO_XCB_MINUS	(1 << 6)
 static uint32_t do_xcb_events(xcb_connection_t *connection, struct window *view)
 {
 	xcb_generic_event_t *event;
@@ -175,16 +175,26 @@ static uint32_t do_xcb_events(xcb_connection_t *connection, struct window *view)
 					ret |= DO_XCB_RESTART;
 					break;
 				}
-				if ((event->response_type & ~0x80) == XCB_KEY_PRESS &&
-				    (key->detail == 0x72 /* Right */)) {
-					ret |= DO_XCB_RIGHT;
+				if ((event->response_type & ~0x80) == XCB_KEY_PRESS) {
+					switch (key->detail) {
+					case 0x72: /* Right */
+						ret |= DO_XCB_RIGHT;
+						break;
+					case 0x71: /* Left */
+						ret |= DO_XCB_LEFT;
+						break;
+					case 0x56: /* KP_Plus */
+						ret |= DO_XCB_PLUS;
+						break;
+					case 0x52: /* KP_Minus */
+						ret |= DO_XCB_MINUS;
+						break;
+					default:
+						goto dump_key;
+					}
 					break;
 				}
-				if ((event->response_type & ~0x80) == XCB_KEY_PRESS &&
-				    (key->detail == 0x71 /* Left */)) {
-					ret |= DO_XCB_LEFT;
-					break;
-				}
+				dump_key:
 				fprintf(stderr, "key %s: 0x%02x mod 0x%x\n",
 					(event->response_type & ~0x80) == XCB_KEY_PRESS ?
 					"press" : "release",
@@ -236,6 +246,14 @@ fail:
 	return c;
 }
 
+static void start_redraw(struct input *in, struct window *view)
+{
+	in->amount = 0;
+	lseek(in->fd, in->input_offset, SEEK_SET);
+	xcb_clear_area(view->c, 1, view->w, 0, 0,
+		       view->size.width, view->size.height);
+}
+
 int main(int argc, char *argv[])
 {
 	static char RAWVIEW[] = "rawview";
@@ -285,13 +303,12 @@ int main(int argc, char *argv[])
 	fds[1].events = POLLIN;
 	fds[1].revents = 0;
 
-	struct input in;
-	in.fd = STDIN_FILENO;
-	in.input_offset = 0;
-	in.input_size = BUFSIZ;
-	in.amount = 0;
-	in.buf = NULL;
-	in.bufsize = BUFSIZ;
+	struct input *in = malloc(sizeof(*in) + 4096);
+	in->fd = STDIN_FILENO;
+	in->input_offset = 0;
+	in->input_size = 4096;
+	in->amount = 0;
+	in->bufsize = 4096;
 
 	int timeout = -1;
 	while (nfds > 0) {
@@ -310,32 +327,35 @@ int main(int argc, char *argv[])
 					exposed = nfds = 2;
 			}
 			if (ret & DO_XCB_RIGHT) {
-				in.input_offset += in.input_size;
-				in.amount = 0;
-				lseek(in.fd, in.input_offset, SEEK_SET);
-				xcb_clear_area(view->c, 1, view->w, 0, 0,
-					       view->size.width, view->size.height);
+				in->input_offset += in->input_size;
+				start_redraw(in, view);
 				nfds = 2;
 				fds[1].revents |= POLLIN;
-			}
-			else if (ret & DO_XCB_LEFT) {
-				in.amount = 0;
-				if (in.input_offset > in.input_size)
-					in.input_offset -= in.input_size;
+			} else if (ret & DO_XCB_LEFT) {
+				if (in->input_offset > in->input_size)
+					in->input_offset -= in->input_size;
 				else
-					in.input_offset = 0;
-				lseek(in.fd, in.input_offset, SEEK_SET);
-				xcb_clear_area(view->c, 1, view->w, 0, 0,
-					       view->size.width, view->size.height);
+					in->input_offset = 0;
+				start_redraw(in, view);
+				nfds = 2;
+				fds[1].revents |= POLLIN;
+			} else if (ret & DO_XCB_PLUS) {
+				in->input_size += 1024;
+				start_redraw(in, view);
+				nfds = 2;
+				fds[1].revents |= POLLIN;
+			} else if (ret & DO_XCB_MINUS) {
+				if (in->input_size > 1024)
+					in->input_size -= 1024;
+				else
+					in->input_size = 1024;
+				start_redraw(in, view);
 				nfds = 2;
 				fds[1].revents |= POLLIN;
 			}
 			if (ret & DO_XCB_RESTART) {
-				in.amount = 0;
-				in.input_offset = 0;
-				lseek(in.fd, 0, SEEK_SET);
-				xcb_clear_area(view->c, 1, view->w, 0, 0,
-					       view->size.width, view->size.height);
+				in->input_offset = 0;
+				start_redraw(in, view);
 				nfds = 2;
 				fds[1].revents |= POLLIN;
 			}
@@ -347,11 +367,11 @@ int main(int argc, char *argv[])
 			continue;
 		}
 		if (fds[1].revents & POLLIN) {
-			if (in.amount >= in.input_size) {
+			if (in->amount >= in->input_size) {
 				nfds = 1;
 				continue;
 			}
-			ssize_t rd = read_input(&in, view, in.input_size - in.amount);
+			ssize_t rd = read_input(in, view, in->input_size - in->amount);
 			if (rd <= 0)
 				nfds = 1;
 		}
