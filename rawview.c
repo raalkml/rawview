@@ -1,3 +1,5 @@
+#include <stdarg.h>
+#include <stdint.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
@@ -10,6 +12,19 @@
 #include "rawview.h"
 
 static int debug;
+
+static inline int trace(const char *fmt, ...)
+{
+	int ret = 0;
+	if (debug) {
+		va_list args;
+		va_start(args, fmt);
+		ret = vfprintf(stderr, fmt, args);
+		va_end(args);
+	}
+	return ret;
+}
+
 static const char font_name[] = "fixed";
 
 static struct window *create_rawview_window(xcb_connection_t *c, const char *title, const char *icon)
@@ -130,7 +145,7 @@ struct input
 static ssize_t read_input(struct input *in, struct window *view, size_t count)
 {
 	ssize_t rd = read(in->fd, in->buf, count < in->bufsize ? count : in->bufsize);
-	//fprintf(stderr, "%ld %s\n", (long)rd, rd < 0 ? strerror(errno) : "");
+	trace("%ld %s\n", (long)rd, rd < 0 ? strerror(errno) : "");
 	if (rd > 0)
 		in->amount += rd;
 	if (rd > 1)
@@ -209,21 +224,20 @@ static uint32_t do_xcb_events(xcb_connection_t *connection, struct window *view)
 					break;
 				}
 				dump_key:
-				if (debug)
-				fprintf(stderr, "key %s: 0x%02x mod 0x%x\n",
-					(event->response_type & ~0x80) == XCB_KEY_PRESS ?
-					"press" : "release",
-					key->detail, key->state);
+				trace("key %s: 0x%02x mod 0x%x\n",
+				      (event->response_type & ~0x80) == XCB_KEY_PRESS ?
+				      "press" : "release",
+				      key->detail, key->state);
 			}
 			break;
 
 		case XCB_BUTTON_PRESS:
 			{ xcb_button_press_event_t *press = (xcb_button_press_event_t *)event; }
-			fprintf(stderr, "xcb event 0x%x\n", event->response_type);
+			trace("xcb event 0x%x\n", event->response_type);
 			break;
 
 		default: 
-			fprintf(stderr, "xcb event 0x%x\n", event->response_type);
+			trace("xcb event 0x%x\n", event->response_type);
 			break;
 		}
 
@@ -253,7 +267,7 @@ static xcb_connection_t *connect_x_server()
 		xcb_intern_atom_reply_t *reply;
 
 		reply = xcb_intern_atom_reply(c, cookie[i], NULL);
-		fprintf(stderr, "atom %s -> %u\n", rq[i].name, reply ? reply->atom : ~0u);
+		trace("atom %s -> %u\n", rq[i].name, reply ? reply->atom : ~0u);
 		*rq[i].re = reply ? reply->atom : ~0u;
 		free(reply);
 	}
