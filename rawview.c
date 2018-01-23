@@ -274,11 +274,15 @@ int main(int argc, char *argv[])
 	static char RAWVIEW[] = "rawview";
 	char *title = RAWVIEW;
 	int opt;
+	long long start_offset = 0;
 
-	while ((opt = getopt(argc, argv, "hD")) != -1)
+	while ((opt = getopt(argc, argv, "hDO:")) != -1)
 		switch (opt) {
 		case 'D':
 			++debug;
+			break;
+		case 'O':
+			start_offset = strtoll(optarg, NULL, 0);
 			break;
 		case 'h':
 			break;
@@ -323,10 +327,14 @@ int main(int argc, char *argv[])
 
 	struct input *in = malloc(sizeof(*in) + 4096);
 	in->fd = STDIN_FILENO;
-	in->input_offset = 0;
+	in->input_offset = start_offset;
 	in->input_size = 4096;
 	in->amount = 0;
 	in->bufsize = 4096;
+	if (lseek(in->fd, in->input_offset, SEEK_SET) == -1) {
+		in->input_offset = 0;
+		fprintf(stderr, "lseek: %s\n", strerror(errno));
+	}
 
 	int timeout = -1;
 	while (nfds > 0) {
