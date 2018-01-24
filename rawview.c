@@ -151,7 +151,7 @@ static void expose_view(struct window *view)
 
 static void analyze(struct window *view, uint8_t buf[], size_t count)
 {
-	static xcb_point_t pts[BUFSIZ];
+	xcb_point_t pts[BUFSIZ / sizeof(xcb_point_t)];
 
 	unsigned i, o = 0;
 	for (i = 1; i < count; ++i) {
