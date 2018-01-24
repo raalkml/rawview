@@ -37,8 +37,16 @@ struct well_known_atom
 };
 extern struct well_known_atom ATOM;
 
-void conti_reset_graph(struct window *view);
-void conti_analyze(struct window *view, uint8_t buf[], size_t count);
+struct graph_desc
+{
+	const char *name;
+	unsigned int width, height;
+
+	void (*reset)(struct window *);
+	void (*analyze)(struct window *, uint8_t buf[], size_t count);
+};
+
+extern struct graph_desc conti_graph;
 
 int trace(const char *fmt, ...);
 

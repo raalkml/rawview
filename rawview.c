@@ -32,6 +32,12 @@ struct rawview
 	char *title;
 	unsigned autoscroll:1;
 	unsigned seekable:1;
+
+	/* Status area: color rainbow, stats, other text info */
+	unsigned int status_height;
+
+	/* Graph area */
+	struct graph_desc *graph;
 };
 
 static struct rawview prg;
@@ -51,10 +57,11 @@ int trace(const char *fmt, ...)
 
 static const char font_name[] = "fixed";
 
-static struct window *create_rawview_window(xcb_connection_t *c, const char *title, const char *icon)
+static struct window *create_rawview_window(struct rawview *prg, const char *icon)
 {
 	uint32_t mask;
 	uint32_t values[5];
+	xcb_connection_t *c = prg->connection;
 	struct window *view = calloc(1, sizeof(*view));
 	unsigned i;
 
@@ -107,8 +114,8 @@ static struct window *create_rawview_window(xcb_connection_t *c, const char *tit
 
 	view->size.x = 0;
 	view->size.y = 0;
-	view->size.width = 300;
-	view->size.height = 300;
+	view->size.width = prg->graph->width + 2 * 5 + 2 * 2;
+	view->size.height = prg->graph->height + 2 * 5 + 2 * 2 + prg->status_height;
 
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_BORDER_PIXEL | XCB_CW_EVENT_MASK;
 	values[0] = screen->black_pixel;
@@ -132,9 +139,9 @@ static struct window *create_rawview_window(xcb_connection_t *c, const char *tit
 			    view->w,
 			    XCB_ATOM_WM_NAME,
 			    XCB_ATOM_STRING, 8,
-			    strlen(title), title);
+			    strlen(prg->title), prg->title);
 	if (!icon)
-		icon = title;
+		icon = prg->title;
 	xcb_change_property(view->c,
 			    XCB_PROP_MODE_REPLACE,
 			    view->w,
@@ -159,10 +166,11 @@ static struct window *create_rawview_window(xcb_connection_t *c, const char *tit
 	xcb_create_gc(view->c, view->fg, view->w, mask, values);
 	xcb_close_font(view->c, view->font);
 
+	/* Graph area configuration */
 	view->graph_area.x = 5;
 	view->graph_area.y = 5;
-	view->graph_area.width = 256;
-	view->graph_area.height = 256;
+	view->graph_area.width = prg->graph->width;
+	view->graph_area.height = prg->graph->height;
 	xcb_create_pixmap(view->c, screen->root_depth, view->graph_pid, view->w,
 			  view->graph_area.width, view->graph_area.height);
 	/* graph GC */
@@ -171,8 +179,9 @@ static struct window *create_rawview_window(xcb_connection_t *c, const char *tit
 	values[1] = screen->black_pixel;
 	values[2] = 0;
 	xcb_create_gc(view->c, view->graph, view->graph_pid, mask, values);
-	conti_reset_graph(view);
+	prg->graph->reset(view);
 
+	/* Status area configuration */
 	view->status_area.x = 5;
 	view->status_area.y = view->graph_area.y + view->graph_area.height + 3;
 	view->status_area.width = view->size.width;
@@ -218,12 +227,14 @@ static void expose_view(struct window *view)
 
 static ssize_t read_input(struct input *in, struct window *view, size_t count)
 {
+	struct rawview *prg = container_of(in, struct rawview, in);
 	ssize_t rd = read(in->pfd.fd, in->buf, count < in->bufsize ? count : in->bufsize);
+
 	trace("%ld %s\n", (long)rd, rd < 0 ? strerror(errno) : "");
 	if (rd > 0)
 		in->amount += rd;
 	if (rd > 1)
-		conti_analyze(view, in->buf, rd);
+		prg->graph->analyze(view, in->buf, rd);
 	int len = snprintf(view->status_line, sizeof(view->status_line),
 			   in->amount != in->input_size ?
 			   "%lld (%lu/%lu)" : "%lld (%lu)",
@@ -364,7 +375,7 @@ static void start_redraw(struct rawview *prg)
 	if (prg->seekable &&
 	    lseek(prg->in.pfd.fd, prg->in.input_offset, SEEK_SET) == -1 && ESPIPE == errno)
 		prg->seekable = 0;
-	conti_reset_graph(prg->view);
+	prg->graph->reset(prg->view);
 /*	xcb_clear_area(prg->view->c, 1, prg->view->w,
 		       0, 0, prg->view->size.width, prg->view->size.height); */
 }
@@ -506,13 +517,16 @@ static struct rawview prg = {
 	.title = RAWVIEW,
 	.autoscroll = 0,
 	.seekable = 1,
+
+	.status_height = 32,
+	.graph = &conti_graph,
 };
 
 int main(int argc, char *argv[])
 {
 	int opt;
 
-	while ((opt = getopt(argc, argv, "hDO:A")) != -1)
+	while ((opt = getopt(argc, argv, "hDO:Av:")) != -1)
 		switch (opt) {
 		case 'A':
 			prg.autoscroll = 1;
@@ -548,7 +562,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Cannot connect to DISPLAY\n");
 		exit(2);
 	}
-	prg.view = create_rawview_window(prg.connection, prg.title, NULL);
+	prg.view = create_rawview_window(&prg, RAWVIEW);
 	if (!prg.view) {
 		fprintf(stderr, "out of memory\n");
 		exit(2);

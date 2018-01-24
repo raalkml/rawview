@@ -8,7 +8,7 @@
 
 static uint8_t conti[256][256];
 
-void conti_reset_graph(struct window *view)
+static void reset(struct window *view)
 {
 	uint32_t mask = XCB_GC_FOREGROUND;
 	uint32_t values[] = { view->colors.graph_bg };
@@ -19,7 +19,7 @@ void conti_reset_graph(struct window *view)
 	memset(conti, 0, sizeof(conti));
 }
 
-void conti_analyze(struct window *view, uint8_t buf[], size_t count)
+static void analyze(struct window *view, uint8_t buf[], size_t count)
 {
 	xcb_point_t pts[BUFSIZ / sizeof(xcb_point_t)];
 	unsigned i, o = 0;
@@ -50,3 +50,10 @@ void conti_analyze(struct window *view, uint8_t buf[], size_t count)
 	}
 }
 
+struct graph_desc conti_graph = {
+	.name = "conti",
+	.width = 256,
+	.height = 256,
+	.reset = reset,
+	.analyze = analyze,
+};
