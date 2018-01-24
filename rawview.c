@@ -287,11 +287,13 @@ static enum rawview_event do_xcb_events(xcb_connection_t *connection, struct win
 					case 0x41 /* Space */:
 						ret = RAWVIEW_EV_SPACE;
 						break;
-					case 0x72: /* Right */
-						ret = RAWVIEW_EV_RIGHT;
-						break;
+					case 0x70: /* PgUp */
 					case 0x71: /* Left */
 						ret = RAWVIEW_EV_LEFT;
+						break;
+					case 0x72: /* Right */
+					case 0x75: /* PgDn */
+						ret = RAWVIEW_EV_RIGHT;
 						break;
 					case 0x56: /* KP_Plus */
 						ret = RAWVIEW_EV_PLUS;
