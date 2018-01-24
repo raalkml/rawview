@@ -36,5 +36,7 @@ struct well_known_atom
 	xcb_atom_t _NET_WM_WINDOW_TYPE_DIALOG;
 };
 extern struct well_known_atom ATOM;
+void conti_reset_graph(struct window *view);
+void conti_analyze(struct window *view, uint8_t buf[], size_t count);
 
 #endif /* _RAWVIEW_H_ */
