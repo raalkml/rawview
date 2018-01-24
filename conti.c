@@ -23,10 +23,9 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 {
 	xcb_point_t pts[BUFSIZ / sizeof(xcb_point_t)];
 	unsigned i, o = 0;
-	uint32_t mask = XCB_GC_FOREGROUND;
-	uint32_t values[] = { view->colors.graph_fg[0] };
+	uint32_t curclr = view->colors.graph_fg[0];
 
-	xcb_change_gc(view->c, view->graph, mask, values);
+	xcb_change_gc(view->c, view->graph, XCB_GC_FOREGROUND, &curclr);
 	for (i = 1; i < count; ++i) {
 		uint32_t clr;
 		unsigned cnt = conti[buf[i - 1]][buf[i]];
@@ -36,10 +35,10 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 		clr = view->colors.graph_fg[countof(view->colors.graph_fg) * cnt / 256];
 		pts[o].x = buf[i - 1];
 		pts[o].y = buf[i];
-		if (values[0] != clr || ++o == countof(pts)) {
-			if (values[0] != clr) {
-				values[0] = clr;
-				xcb_change_gc(view->c, view->graph, mask, values);
+		if (curclr != clr || ++o == countof(pts)) {
+			if (curclr != clr) {
+				curclr = clr;
+				xcb_change_gc(view->c, view->graph, XCB_GC_FOREGROUND, &curclr);
 			}
 			xcb_poly_point(view->c, XCB_COORD_MODE_ORIGIN, view->graph_pid, view->graph, o, pts);
 			o = 0;
