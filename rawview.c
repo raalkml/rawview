@@ -242,15 +242,19 @@ static ssize_t read_input(struct input *in, struct window *view, size_t count)
 	return rd;
 }
 
-#define DO_XCB_EXPOSE	(1 << 0)
-#define DO_XCB_QUIT	(1 << 1)
-#define DO_XCB_RESTART	(1 << 2)
-#define DO_XCB_LEFT	(1 << 3)
-#define DO_XCB_RIGHT	(1 << 4)
-#define DO_XCB_PLUS	(1 << 5)
-#define DO_XCB_MINUS	(1 << 6)
-#define DO_XCB_SPACE	(1 << 7)
-static uint32_t do_xcb_events(xcb_connection_t *connection, struct window *view)
+enum rawview_event
+{
+	RAWVIEW_EV_EXPOSE,
+	RAWVIEW_EV_QUIT,
+	RAWVIEW_EV_RESTART,
+	RAWVIEW_EV_LEFT,
+	RAWVIEW_EV_RIGHT,
+	RAWVIEW_EV_PLUS,
+	RAWVIEW_EV_MINUS,
+	RAWVIEW_EV_SPACE,
+};
+
+static enum rawview_event do_xcb_events(xcb_connection_t *connection, struct window *view)
 {
 	xcb_generic_event_t *event;
 	unsigned ret = 0;
@@ -258,7 +262,7 @@ static uint32_t do_xcb_events(xcb_connection_t *connection, struct window *view)
 	while ((event = xcb_poll_for_event(connection))) {
 		switch (event->response_type & ~0x80) {
 		case XCB_EXPOSE:
-			ret |= DO_XCB_EXPOSE;
+			ret = RAWVIEW_EV_EXPOSE;
 			break;
 
 		case XCB_KEY_PRESS:
@@ -267,29 +271,29 @@ static uint32_t do_xcb_events(xcb_connection_t *connection, struct window *view)
 				xcb_key_press_event_t *key = (xcb_key_press_event_t *)event;
 				if ((event->response_type & ~0x80) == XCB_KEY_RELEASE &&
 				    (key->detail == 0x1b /* R */ || key->detail == 0x47 /* F5 */)) {
-					ret |= DO_XCB_RESTART;
+					ret = RAWVIEW_EV_RESTART;
 					break;
 				}
 				if ((event->response_type & ~0x80) == XCB_KEY_PRESS) {
 					switch (key->detail) {
 					case 0x18 /* Q */:
 					case 0x09 /* Esc */:
-						ret |= DO_XCB_QUIT;
+						ret = RAWVIEW_EV_QUIT;
 						break;
 					case 0x41 /* Space */:
-						ret |= DO_XCB_SPACE;
+						ret = RAWVIEW_EV_SPACE;
 						break;
 					case 0x72: /* Right */
-						ret |= DO_XCB_RIGHT;
+						ret = RAWVIEW_EV_RIGHT;
 						break;
 					case 0x71: /* Left */
-						ret |= DO_XCB_LEFT;
+						ret = RAWVIEW_EV_LEFT;
 						break;
 					case 0x56: /* KP_Plus */
-						ret |= DO_XCB_PLUS;
+						ret = RAWVIEW_EV_PLUS;
 						break;
 					case 0x52: /* KP_Minus */
-						ret |= DO_XCB_MINUS;
+						ret = RAWVIEW_EV_MINUS;
 						break;
 					default:
 						goto dump_key;
@@ -362,7 +366,6 @@ static void start_redraw(struct rawview *prg)
 static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 {
 	struct rawview *prg = container_of(pfd, struct rawview, pfd);
-	unsigned ret;
 
 	if (pfd->revents & (POLLHUP|POLLNVAL)) {
 		remove_poll(pctx, pfd);
@@ -371,35 +374,48 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 	if (!(pfd->revents & POLLIN))
 		return;
 
-	ret = do_xcb_events(prg->connection, prg->view);
-	if (ret & DO_XCB_QUIT) {
+	switch (do_xcb_events(prg->connection, prg->view)) {
+		static int exposed;
+
+	case RAWVIEW_EV_QUIT:
 		xcb_disconnect(prg->connection);
 		remove_poll(pctx, pfd);
-	}
-	if (ret & DO_XCB_EXPOSE) {
+		break;
+
+	case RAWVIEW_EV_EXPOSE:
 		/* start reading stdin on first expose event */
-		static int exposed;
 		if (!exposed) {
 			exposed = 1;
 			add_poll(pctx, &prg->in.pfd);
 		}
 		expose_view(prg->view);
-	}
-	if (ret & (DO_XCB_RIGHT|DO_XCB_SPACE)) {
-		prg->in.input_offset += prg->in.input_size;
+		break;
+
+	case RAWVIEW_EV_RIGHT:
+	case RAWVIEW_EV_SPACE:
+		if (!prg->autoscroll)
+			prg->in.input_offset += prg->in.input_size;
 		start_redraw(prg);
 		add_poll(pctx, &prg->in.pfd);
-	} else if (prg->seekable && (ret & DO_XCB_LEFT)) {
-		off_t prev = prg->in.input_offset;
-		if (prg->in.input_offset > prg->in.input_size)
-			prg->in.input_offset -= prg->in.input_size;
-		else
-			prg->in.input_offset = 0;
-		if (prev != prg->in.input_offset) {
-			start_redraw(prg);
-			add_poll(pctx, &prg->in.pfd);
+		prg->autoscroll = 0;
+		break;
+
+	case RAWVIEW_EV_LEFT:
+		if (prg->seekable) {
+			off_t prev = prg->in.input_offset;
+			if (prg->in.input_offset > prg->in.input_size)
+				prg->in.input_offset -= prg->in.input_size;
+			else
+				prg->in.input_offset = 0;
+			if (prev != prg->in.input_offset) {
+				start_redraw(prg);
+				add_poll(pctx, &prg->in.pfd);
+			}
+			prg->autoscroll = 0;
 		}
-	} else if (ret & DO_XCB_PLUS) {
+		break;
+
+	case RAWVIEW_EV_PLUS:
 		prg->in.input_size += 1024;
 		prg->in.amount = 0;
 		if (prg->seekable) {
@@ -409,21 +425,30 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 		}
 		start_redraw(prg);
 		add_poll(pctx, &prg->in.pfd);
-	} else if (ret & DO_XCB_MINUS) {
-		size_t prev = prg->in.input_size;
-		if (prg->in.input_size > 1024)
-			prg->in.input_size -= 1024;
-		else
-			prg->in.input_size = 1024;
-		if (prev != prg->in.input_size) {
+		break;
+
+	case RAWVIEW_EV_MINUS:
+		{
+			size_t prev = prg->in.input_size;
+			if (prg->in.input_size > 1024)
+				prg->in.input_size -= 1024;
+			else
+				prg->in.input_size = 1024;
+			if (prev != prg->in.input_size) {
+				start_redraw(prg);
+				add_poll(pctx, &prg->in.pfd);
+			}
+		}
+		break;
+
+	case RAWVIEW_EV_RESTART:
+		if (prg->seekable) {
+			prg->autoscroll = 0;
+			prg->in.input_offset = 0;
 			start_redraw(prg);
 			add_poll(pctx, &prg->in.pfd);
 		}
-	}
-	if (prg->seekable && (ret & DO_XCB_RESTART)) {
-		prg->in.input_offset = 0;
-		start_redraw(prg);
-		add_poll(pctx, &prg->in.pfd);
+		break;
 	}
 }
 
