@@ -175,7 +175,7 @@ static struct window *create_rawview_window(struct rawview *prg, const char *ico
 			  view->graph_area.width, view->graph_area.height);
 	/* graph GC */
 	mask = XCB_GC_FOREGROUND |XCB_GC_BACKGROUND | XCB_GC_GRAPHICS_EXPOSURES;
-	values[0] = screen->white_pixel;
+	values[0] = view->colors.graph_fg[0];
 	values[1] = screen->black_pixel;
 	values[2] = 0;
 	xcb_create_gc(view->c, view->graph, view->graph_pid, mask, values);
