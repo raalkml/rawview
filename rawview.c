@@ -36,6 +36,7 @@ struct rawview
 
 static struct rawview prg;
 static int debug;
+static void reset_graph(struct window *view);
 
 static inline int trace(const char *fmt, ...)
 {
@@ -53,49 +54,57 @@ static const char font_name[] = "fixed";
 
 static struct window *create_rawview_window(xcb_connection_t *c, const char *title, const char *icon)
 {
+	uint32_t mask;
+	uint32_t values[5];
 	struct window *view = calloc(1, sizeof(*view));
+	unsigned i;
 
 	if (!view)
 		goto fail;
 
+	/* get the first screen */
+	xcb_screen_t *screen = xcb_setup_roots_iterator(xcb_get_setup(c)).data;
+
+	struct {
+		uint32_t *ret;
+		uint16_t r, g, b;
+		xcb_alloc_color_cookie_t rq;
+	} colors[] = {
+		{ &view->colors.red,    0xffff, 0, 0 },
+		{ &view->colors.green,  0, 0xffff, 0 },
+		{ &view->colors.blue,   0, 0, 0xffff },
+		{ &view->colors.border, 0x7fff, 0x7fff, 0x7fff },
+		{ &view->colors.graph_fg, 0x7fff, 0x7fff, 0x7fff },
+		{ &view->colors.graph_bg, 0, 0, 0 },
+	};
+	for (i = 0; i < countof(colors); ++i)
+		colors[i].rq = xcb_alloc_color(c, screen->default_colormap,
+					       colors[i].r,
+					       colors[i].g,
+					       colors[i].b);
+	for (i = 0; i < countof(colors); ++i) {
+		xcb_alloc_color_reply_t *re;
+		re = xcb_alloc_color_reply(c, colors[i].rq, NULL);
+		*colors[i].ret = re ? re->pixel : screen->black_pixel;
+		trace("color %u: 0x%08x\n", i, *colors[i].ret);
+		free(re);
+	}
+
 	view->c = c;
+	view->font = xcb_generate_id(view->c);
+	view->fg = xcb_generate_id(view->c);
+	view->graph_pid = xcb_generate_id(view->c);
+	view->graph = xcb_generate_id(view->c);
+	view->w = xcb_generate_id(view->c);
+
 	view->size.x = 0;
 	view->size.y = 0;
 	view->size.width = 300;
 	view->size.height = 300;
 
-	/* get the first screen */
-	xcb_screen_t *screen = xcb_setup_roots_iterator(xcb_get_setup(c)).data;
-
-	view->font = xcb_generate_id(view->c);
-	xcb_open_font(view->c, view->font, strlen(font_name), font_name);
-
-	/* Create foreground graphic context */
-	uint32_t mask      = XCB_GC_FOREGROUND | XCB_GC_FONT | XCB_GC_GRAPHICS_EXPOSURES;
-	uint32_t values[5] = { screen->white_pixel, view->font, 0 };
-
-	/* full window GC */
-	view->fg = xcb_generate_id(view->c);
-	xcb_create_gc(view->c, view->fg, screen->root, mask, values);
-	xcb_close_font(view->c, view->font);
-
-	/* graph GC */
-	mask = XCB_GC_FOREGROUND |XCB_GC_BACKGROUND | XCB_GC_GRAPHICS_EXPOSURES;
-	values[0] = screen->white_pixel;
-	values[1] = screen->black_pixel;
-	values[2] = 0;
-	view->graph = xcb_generate_id(view->c);
-	view->graph_area.x = 5;
-	view->graph_area.y = 5;
-	view->graph_area.width = 256;
-	view->graph_area.height = 256;
-	xcb_create_gc(view->c, view->graph, screen->root, mask, values);
-	xcb_set_clip_rectangles(view->c, XCB_CLIP_ORDERING_UNSORTED, view->graph, 0, 0, 1, &view->graph_area);
-
-	view->w = xcb_generate_id(view->c);
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_BORDER_PIXEL | XCB_CW_EVENT_MASK;
 	values[0] = screen->black_pixel;
-	values[1] = screen->white_pixel;
+	values[1] = view->colors.border;
 	values[2] = XCB_EVENT_MASK_EXPOSURE |
 		XCB_EVENT_MASK_BUTTON_PRESS |
 		XCB_EVENT_MASK_KEY_PRESS    |
@@ -133,37 +142,81 @@ static struct window *create_rawview_window(xcb_connection_t *c, const char *tit
 			    1,
 			    (unsigned char *)&ATOM._NET_WM_WINDOW_TYPE_DIALOG);
 
+	/* Create foreground graphic context */
+	xcb_open_font(view->c, view->font, strlen(font_name), font_name);
+	mask = XCB_GC_FOREGROUND | XCB_GC_FONT | XCB_GC_GRAPHICS_EXPOSURES;
+	values[0] = screen->white_pixel;
+	values[1] = view->font;
+	values[2] = 0;
+	xcb_create_gc(view->c, view->fg, view->w, mask, values);
+	xcb_close_font(view->c, view->font);
+
+	view->graph_area.x = 5;
+	view->graph_area.y = 5;
+	view->graph_area.width = 256;
+	view->graph_area.height = 256;
+	xcb_create_pixmap(view->c, screen->root_depth, view->graph_pid, view->w,
+			  view->graph_area.width, view->graph_area.height);
+	/* graph GC */
+	mask = XCB_GC_FOREGROUND |XCB_GC_BACKGROUND | XCB_GC_GRAPHICS_EXPOSURES;
+	values[0] = screen->white_pixel;
+	values[1] = screen->black_pixel;
+	values[2] = 0;
+	xcb_create_gc(view->c, view->graph, view->graph_pid, mask, values);
+	reset_graph(view);
+
+	view->status_area.x = 5;
+	view->status_area.y = view->graph_area.y + view->graph_area.height;
+	view->status_area.width = view->size.width;
+	view->status_area.height = view->size.height - view->status_area.y;
 fail:
 	return view;
 }
 
 static void expose_view(struct window *view)
 {
-	/*
-	xcb_poly_point(view->c, XCB_COORD_MODE_ORIGIN, view->w, view->fg, 4, points);
-	xcb_poly_line(view->c, XCB_COORD_MODE_PREVIOUS, view->w, view->fg, 4, polyline);
-	xcb_poly_segment(view->c, view->w, view->fg, 2, segments);
-	xcb_poly_rectangle(view->c, view->w, view->fg, 2, rectangles);
-	xcb_poly_arc(view->c, view->w, view->fg, 2, arcs);
+	trace("%s\n", __PRETTY_FUNCTION__);
+	xcb_copy_area(view->c, view->graph_pid, view->w, view->fg,
+		      0, 0,
+		      view->graph_area.x, view->graph_area.y,
+		      view->graph_area.width,
+		      view->graph_area.height);
+	xcb_image_text_8(view->c, strlen(view->status_line),
+			 view->w, view->fg,
+			 view->status_area.x,
+			 view->status_area.y + 12 /* FIXME: use baseline offset */,
+			 view->status_line);
 	xcb_flush(view->c);
-	*/
+}
+
+static void reset_graph(struct window *view)
+{
+	uint32_t mask = XCB_GC_FOREGROUND;
+	uint32_t values[] = { view->colors.graph_bg };
+	xcb_rectangle_t graph = { 0, 0, view->graph_area.width, view->graph_area.height };
+
+	xcb_change_gc(view->c, view->graph, mask, values);
+	xcb_poly_fill_rectangle(view->c, view->graph_pid, view->graph, 1, &graph);
 }
 
 static void analyze(struct window *view, uint8_t buf[], size_t count)
 {
 	xcb_point_t pts[BUFSIZ / sizeof(xcb_point_t)];
-
 	unsigned i, o = 0;
+	uint32_t mask = XCB_GC_FOREGROUND;
+	uint32_t values[] = { view->colors.graph_fg };
+
+	xcb_change_gc(view->c, view->graph, mask, values);
 	for (i = 1; i < count; ++i) {
-		pts[o].x = buf[i - 1] + view->graph_area.x;
-		pts[o].y = buf[i] + view->graph_area.y;
+		pts[o].x = buf[i - 1];
+		pts[o].y = buf[i];
 		if (++o == countof(pts)) {
-			xcb_poly_point(view->c, XCB_COORD_MODE_ORIGIN, view->w, view->graph, o, pts);
+			xcb_poly_point(view->c, XCB_COORD_MODE_ORIGIN, view->graph_pid, view->graph, o, pts);
 			o = 0;
 		}
 	}
 	if (o) {
-		xcb_poly_point(view->c, XCB_COORD_MODE_ORIGIN, view->w, view->graph, o, pts);
+		xcb_poly_point(view->c, XCB_COORD_MODE_ORIGIN, view->graph_pid, view->graph, o, pts);
 	}
 }
 
@@ -175,24 +228,20 @@ static ssize_t read_input(struct input *in, struct window *view, size_t count)
 		in->amount += rd;
 	if (rd > 1)
 		analyze(view, in->buf, rd);
-	char s[100];
-	int len = snprintf(s, sizeof(s),
+	int len = snprintf(view->status_line, sizeof(view->status_line),
 			   in->amount != in->input_size ?
 			   "%lld (%lu/%lu)" : "%lld (%lu)",
 			   (long long)in->input_offset,
 			   (unsigned long)in->amount,
 			   (unsigned long)in->input_size);
-	xcb_rectangle_t clr = {
-		.x = 0,
-		.y = 5 + 256,
-		.width = view->size.width,
-		.height = view->size.height - 5 - 256,
-	};
 	xcb_clear_area(view->c, 0, view->w,
-		       clr.x, clr.y,
-		       clr.width,
-		       clr.height);
-	xcb_image_text_8(view->c, len, view->w, view->fg, 5, 5 + 256 + 12, s);
+		       view->status_area.x,
+		       view->status_area.y,
+		       view->status_area.width,
+		       view->status_area.height);
+	xcb_image_text_8(view->c, len, view->w, view->fg,
+			 view->status_area.x, view->status_area.y + 12,
+			 view->status_line);
 	xcb_flush(view->c);
 	return rd;
 }
@@ -213,7 +262,6 @@ static uint32_t do_xcb_events(xcb_connection_t *connection, struct window *view)
 	while ((event = xcb_poll_for_event(connection))) {
 		switch (event->response_type & ~0x80) {
 		case XCB_EXPOSE:
-			expose_view(view);
 			ret |= DO_XCB_EXPOSE;
 			break;
 
@@ -310,8 +358,9 @@ static void start_redraw(struct rawview *prg)
 	if (prg->seekable &&
 	    lseek(prg->in.pfd.fd, prg->in.input_offset, SEEK_SET) == -1 && ESPIPE == errno)
 		prg->seekable = 0;
-	xcb_clear_area(prg->view->c, 1, prg->view->w,
-		       0, 0, prg->view->size.width, prg->view->size.height);
+	reset_graph(prg->view);
+/*	xcb_clear_area(prg->view->c, 1, prg->view->w,
+		       0, 0, prg->view->size.width, prg->view->size.height); */
 }
 
 static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
@@ -338,6 +387,7 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 			exposed = 1;
 			add_poll(pctx, &prg->in.pfd);
 		}
+		expose_view(prg->view);
 	}
 	if (ret & (DO_XCB_RIGHT|DO_XCB_SPACE)) {
 		prg->in.input_offset += prg->in.input_size;
@@ -390,7 +440,9 @@ static void pfd_input_proc(struct poll_context *pctx, struct poll_fd *pfd)
 		return;
 	}
 	ssize_t rd = read_input(in, prg->view, in->input_size - in->amount);
-	if (rd <= 0) {
+	if (rd > 0) {
+		expose_view(prg->view);
+	} else {
 		remove_poll(pctx, pfd);
 		prg->autoscroll = 0;
 	}

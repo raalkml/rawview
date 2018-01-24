@@ -11,9 +11,23 @@ struct window
 	xcb_window_t w;
 	xcb_gcontext_t fg;
 	xcb_gcontext_t graph;
+	xcb_pixmap_t graph_pid;
 	xcb_rectangle_t graph_area;
 	xcb_font_t font;
 	xcb_rectangle_t size;
+	struct
+	{
+		uint32_t red;
+		uint32_t green;
+		uint32_t blue;
+		uint32_t white;
+		uint32_t black;
+		uint32_t border;
+		uint32_t graph_fg;
+		uint32_t graph_bg;
+	} colors;
+	xcb_rectangle_t status_area;
+	char status_line[100];
 };
 
 struct well_known_atom
