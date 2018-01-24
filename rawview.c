@@ -252,6 +252,7 @@ enum rawview_event
 	RAWVIEW_EV_PLUS,
 	RAWVIEW_EV_MINUS,
 	RAWVIEW_EV_SPACE,
+	RAWVIEW_EV_AUTOSCROLL,
 };
 
 static enum rawview_event do_xcb_events(xcb_connection_t *connection, struct window *view)
@@ -279,6 +280,9 @@ static enum rawview_event do_xcb_events(xcb_connection_t *connection, struct win
 					case 0x18 /* Q */:
 					case 0x09 /* Esc */:
 						ret = RAWVIEW_EV_QUIT;
+						break;
+					case 0x26 /* A */:
+						ret = RAWVIEW_EV_AUTOSCROLL;
 						break;
 					case 0x41 /* Space */:
 						ret = RAWVIEW_EV_SPACE;
@@ -449,6 +453,10 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 			add_poll(pctx, &prg->in.pfd);
 		}
 		break;
+
+	case RAWVIEW_EV_AUTOSCROLL:
+		prg->autoscroll = !prg->autoscroll;
+		break;
 	}
 }
 
@@ -566,6 +574,8 @@ int main(int argc, char *argv[])
 
 	while (pollctx.npolls) {
 		int n = poll_fds(&pollctx, timeout);
+		if (prg.autoscroll)
+			timeout = 50;
 		if (n <= 0) {
 			if (prg.autoscroll &&
 			    n == 0 &&
