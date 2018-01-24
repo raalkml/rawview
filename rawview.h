@@ -23,7 +23,7 @@ struct window
 		uint32_t white;
 		uint32_t black;
 		uint32_t border;
-		uint32_t graph_fg;
+		uint32_t graph_fg[10];
 		uint32_t graph_bg;
 	} colors;
 	xcb_rectangle_t status_area;

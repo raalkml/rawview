@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "utils.h"
 #include "rawview.h"
 
@@ -18,37 +19,21 @@ void conti_reset_graph(struct window *view)
 	memset(conti, 0, sizeof(conti));
 }
 
-static inline uint32_t lighten(uint32_t clr, uint32_t off)
-{
-	clr &= 0xff;
-	clr += off & 0xff;
-	return clr > 255 ? 255 : clr;
-}
-
-static inline uint32_t darken(uint32_t clr, uint32_t off)
-{
-	clr &= 0xff;
-	off &= 0xff;
-	return clr < off ? 0 : clr - off;
-}
-
 void conti_analyze(struct window *view, uint8_t buf[], size_t count)
 {
 	xcb_point_t pts[BUFSIZ / sizeof(xcb_point_t)];
 	unsigned i, o = 0;
 	uint32_t mask = XCB_GC_FOREGROUND;
-	uint32_t values[] = { view->colors.graph_fg };
+	uint32_t values[] = { view->colors.graph_fg[0] };
 
 	xcb_change_gc(view->c, view->graph, mask, values);
 	for (i = 1; i < count; ++i) {
 		uint32_t clr;
-		unsigned cnt = conti[buf[i - 1]][buf[i]] + 1;
-		if (cnt < 256)
-			conti[buf[i - 1]][buf[i]] = cnt;
-		/* redden the frequent byte relationships */
-		clr = lighten(view->colors.graph_fg >> 16, cnt * 4) << 16;
-		clr |= darken(view->colors.graph_fg >> 8, cnt / 2) << 8;
-		clr |= darken(view->colors.graph_fg, cnt / 2);
+		unsigned cnt = conti[buf[i - 1]][buf[i]];
+
+		if (cnt < 255)
+			conti[buf[i - 1]][buf[i]] = ++cnt;
+		clr = view->colors.graph_fg[countof(view->colors.graph_fg) * cnt / 256];
 		pts[o].x = buf[i - 1];
 		pts[o].y = buf[i];
 		if (values[0] != clr || ++o == countof(pts)) {

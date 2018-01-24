@@ -69,12 +69,21 @@ static struct window *create_rawview_window(xcb_connection_t *c, const char *tit
 		uint16_t r, g, b;
 		xcb_alloc_color_cookie_t rq;
 	} colors[] = {
-		{ &view->colors.red,    0xffff, 0, 0 },
-		{ &view->colors.green,  0, 0xffff, 0 },
-		{ &view->colors.blue,   0, 0, 0xffff },
-		{ &view->colors.border, 0x7fff, 0x7fff, 0x7fff },
-		{ &view->colors.graph_fg, 0x7fff, 0x7fff, 0x7fff },
-		{ &view->colors.graph_bg, 0, 0, 0 },
+		{ &view->colors.red,         0xffff, 0,      0 },
+		{ &view->colors.green,       0,      0xffff, 0 },
+		{ &view->colors.blue,        0,      0,      0xffff },
+		{ &view->colors.border,      0x5fff, 0x5fff, 0x5fff },
+		{ view->colors.graph_fg + 0, 0x7fff, 0x7fff, 0x7fff },
+		{ view->colors.graph_fg + 1, 0x82ff, 0x00ff, 0x8eff },
+		{ view->colors.graph_fg + 2, 0xeaff, 0x00ff, 0xffff },
+		{ view->colors.graph_fg + 3, 0x10ff, 0x00ff, 0xa9ff },
+		{ view->colors.graph_fg + 4, 0x18ff, 0x00ff, 0xffff },
+		{ view->colors.graph_fg + 5, 0x00ff, 0xe4ff, 0xffff },
+		{ view->colors.graph_fg + 6, 0x00ff, 0xffff, 0x3cff },
+		{ view->colors.graph_fg + 7, 0xeaff, 0xffff, 0x00ff },
+		{ view->colors.graph_fg + 8, 0xffff, 0x84ff, 0x00ff },
+		{ view->colors.graph_fg + 9, 0xffff, 0x00ff, 0x00ff },
+		{ &view->colors.graph_bg,    0,      0,      0 },
 	};
 	for (i = 0; i < countof(colors); ++i)
 		colors[i].rq = xcb_alloc_color(c, screen->default_colormap,
