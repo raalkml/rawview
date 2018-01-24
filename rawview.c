@@ -235,6 +235,7 @@ static ssize_t read_input(struct input *in, struct window *view, size_t count)
 		       view->status_area.y,
 		       view->status_area.width,
 		       view->status_area.height);
+	xcb_change_gc(view->c, view->fg, XCB_GC_FOREGROUND, view->colors.graph_fg);
 	xcb_image_text_8(view->c, len, view->w, view->fg,
 			 view->status_area.x, view->status_area.y + 12,
 			 view->status_line);
