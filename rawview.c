@@ -539,6 +539,10 @@ int main(int argc, char *argv[])
 			break;
 		case 'h':
 			break;
+		case 'v':
+			if (strcasecmp(optarg, conti_graph.name) == 0)
+				prg.graph = &conti_graph;
+			break;
 		}
 	if (optind < argc) {
 		int fd = open(argv[optind], O_RDONLY);
