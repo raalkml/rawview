@@ -494,9 +494,12 @@ static void pfd_input_proc(struct poll_context *pctx, struct poll_fd *pfd)
 	}
 	ssize_t rd = read_input(in, prg->view, in->input_size - in->amount);
 	if (rd > 0) {
-		expose_view(prg->view);
+		if (in->amount >= in->input_size) {
+			expose_view(prg->view);
+			remove_poll(pctx, pfd);
+		}
 	} else {
-		xcb_flush(prg->connection);
+		expose_view(prg->view);
 		remove_poll(pctx, pfd);
 		prg->autoscroll = 0;
 	}
