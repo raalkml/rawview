@@ -408,6 +408,7 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 			    ESPIPE == errno)
 				prg->seekable = 0;
 		}
+		start_redraw(prg);
 		add_poll(pctx, &prg->in.pfd);
 	} else if (ret & DO_XCB_MINUS) {
 		if (prg->in.input_size > 1024)
