@@ -37,7 +37,7 @@ struct rawview
 static struct rawview prg;
 static int debug;
 
-static inline int trace(const char *fmt, ...)
+int trace(const char *fmt, ...)
 {
 	int ret = 0;
 	if (debug) {
