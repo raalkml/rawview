@@ -17,4 +17,5 @@
 #define container_of(ptr, type, member) \
 	(((type *)((void *)(ptr) - offsetof(type, member))))
 
+#define countof(a) (sizeof(a) / sizeof(a[0]))
 #endif /* _UTILS_H_ */

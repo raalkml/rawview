@@ -157,7 +157,7 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 	for (i = 1; i < count; ++i) {
 		pts[o].x = buf[i - 1] + view->graph_area.x;
 		pts[o].y = buf[i] + view->graph_area.y;
-		if (++o > BUFSIZ-1) {
+		if (++o == countof(pts)) {
 			xcb_poly_point(view->c, XCB_COORD_MODE_ORIGIN, view->w, view->graph, o, pts);
 			o = 0;
 		}
@@ -283,16 +283,16 @@ static xcb_connection_t *connect_x_server()
 		{ "_NET_WM_WINDOW_TYPE", &ATOM._NET_WM_WINDOW_TYPE },
 		{ "_NET_WM_WINDOW_TYPE_DIALOG", &ATOM._NET_WM_WINDOW_TYPE_DIALOG },
 	};
-	xcb_intern_atom_cookie_t cookie[sizeof(rq)/sizeof(rq[0])];
+	xcb_intern_atom_cookie_t cookie[countof(rq)];
 	unsigned int i;
 	xcb_connection_t *c = xcb_connect(NULL, NULL);
 
 	if (!c)
 		goto fail;
-	for (i = 0; i < sizeof(rq)/sizeof(rq[0]); ++i)
+	for (i = 0; i < countof(rq); ++i)
 		cookie[i] = xcb_intern_atom(c, 1, strlen(rq[i].name), rq[i].name);
 	xcb_flush(c);
-	for (i = 0; i < sizeof(rq)/sizeof(rq[0]); ++i) {
+	for (i = 0; i < countof(rq); ++i) {
 		xcb_intern_atom_reply_t *reply;
 
 		reply = xcb_intern_atom_reply(c, cookie[i], NULL);
