@@ -174,7 +174,7 @@ static struct window *create_rawview_window(xcb_connection_t *c, const char *tit
 	conti_reset_graph(view);
 
 	view->status_area.x = 5;
-	view->status_area.y = view->graph_area.y + view->graph_area.height;
+	view->status_area.y = view->graph_area.y + view->graph_area.height + 3;
 	view->status_area.width = view->size.width;
 	view->status_area.height = view->size.height - view->status_area.y;
 fail:
@@ -183,17 +183,36 @@ fail:
 
 static void expose_view(struct window *view)
 {
-	trace("%s\n", __PRETTY_FUNCTION__);
+	unsigned i;
+
 	xcb_copy_area(view->c, view->graph_pid, view->w, view->fg,
 		      0, 0,
 		      view->graph_area.x, view->graph_area.y,
 		      view->graph_area.width,
 		      view->graph_area.height);
+	xcb_change_gc(view->c, view->fg, XCB_GC_FOREGROUND, view->colors.graph_fg);
 	xcb_image_text_8(view->c, strlen(view->status_line),
 			 view->w, view->fg,
 			 view->status_area.x,
 			 view->status_area.y + 12 /* FIXME: use baseline offset */,
 			 view->status_line);
+
+	int16_t step = view->graph_area.width / countof(view->colors.graph_fg);
+	int16_t rem = view->graph_area.width - step * countof(view->colors.graph_fg);
+	if (!step)
+		step = 1;
+	xcb_point_t pt[2] = {
+		{ view->graph_area.x, view->graph_area.y + view->graph_area.height + 2 },
+		{ view->graph_area.x + step + rem, view->graph_area.y + view->graph_area.height + 2 },
+	};
+	for (i = 0; i < countof(view->colors.graph_fg); ++i) {
+		xcb_change_gc(view->c, view->fg, XCB_GC_FOREGROUND, view->colors.graph_fg + i);
+		if (i == countof(view->colors.graph_fg) - 1)
+			pt[1].x = view->graph_area.x + view->graph_area.width;
+		xcb_poly_line(view->c, XCB_COORD_MODE_ORIGIN, view->w, view->fg, countof(pt), pt);
+		pt[0].x += step;
+		pt[1].x += step;
+	}
 	xcb_flush(view->c);
 }
 
