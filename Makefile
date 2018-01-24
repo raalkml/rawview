@@ -9,4 +9,4 @@ rawview: rawview.o poll-fds.o conti.o
 
 .PHONY: clean
 clean:
-	$(RM) rawview rawview.o
+	$(RM) rawview *.o
