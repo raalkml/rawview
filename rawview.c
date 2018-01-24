@@ -281,11 +281,11 @@ static enum rawview_event do_xcb_events(xcb_connection_t *connection, struct win
 		case XCB_KEY_RELEASE:
 			{
 				xcb_key_press_event_t *key = (xcb_key_press_event_t *)event;
-				if ((event->response_type & ~0x80) == XCB_KEY_RELEASE &&
-				    (key->detail == 0x1b /* R */ || key->detail == 0x47 /* F5 */)) {
+				/* if ((event->response_type & ~0x80) == XCB_KEY_RELEASE &&
+				    (key->detail == 0x1b) {
 					ret = RAWVIEW_EV_RESTART;
 					break;
-				}
+				}*/
 				if ((event->response_type & ~0x80) == XCB_KEY_PRESS) {
 					switch (key->detail) {
 					case 0x18 /* Q */:
@@ -297,6 +297,10 @@ static enum rawview_event do_xcb_events(xcb_connection_t *connection, struct win
 						break;
 					case 0x41: /* Space */
 						ret = RAWVIEW_EV_SPACE;
+						break;
+					case 0x1b: /* R */
+					case 0x6e: /* Home */
+						ret = RAWVIEW_EV_RESTART;
 						break;
 					case 0x70: /* PgUp */
 					case 0x71: /* Left */
