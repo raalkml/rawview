@@ -423,12 +423,15 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 		start_redraw(prg);
 		add_poll(pctx, &prg->in.pfd);
 	} else if (prg->seekable && (ret & DO_XCB_LEFT)) {
+		off_t prev = prg->in.input_offset;
 		if (prg->in.input_offset > prg->in.input_size)
 			prg->in.input_offset -= prg->in.input_size;
 		else
 			prg->in.input_offset = 0;
-		start_redraw(prg);
-		add_poll(pctx, &prg->in.pfd);
+		if (prev != prg->in.input_offset) {
+			start_redraw(prg);
+			add_poll(pctx, &prg->in.pfd);
+		}
 	} else if (ret & DO_XCB_PLUS) {
 		prg->in.input_size += 1024;
 		prg->in.amount = 0;
@@ -440,12 +443,15 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 		start_redraw(prg);
 		add_poll(pctx, &prg->in.pfd);
 	} else if (ret & DO_XCB_MINUS) {
+		size_t prev = prg->in.input_size;
 		if (prg->in.input_size > 1024)
 			prg->in.input_size -= 1024;
 		else
 			prg->in.input_size = 1024;
-		start_redraw(prg);
-		add_poll(pctx, &prg->in.pfd);
+		if (prev != prg->in.input_size) {
+			start_redraw(prg);
+			add_poll(pctx, &prg->in.pfd);
+		}
 	}
 	if (prg->seekable && (ret & DO_XCB_RESTART)) {
 		prg->in.input_offset = 0;
