@@ -239,7 +239,6 @@ static ssize_t read_input(struct input *in, struct window *view, size_t count)
 	xcb_image_text_8(view->c, len, view->w, view->fg,
 			 view->status_area.x, view->status_area.y + 12,
 			 view->status_line);
-	xcb_flush(view->c);
 	return rd;
 }
 
@@ -482,6 +481,7 @@ static void pfd_input_proc(struct poll_context *pctx, struct poll_fd *pfd)
 	if (rd > 0) {
 		expose_view(prg->view);
 	} else {
+		xcb_flush(prg->connection);
 		remove_poll(pctx, pfd);
 		prg->autoscroll = 0;
 	}
