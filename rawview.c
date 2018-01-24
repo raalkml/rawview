@@ -584,10 +584,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "lseek: %s\n", strerror(errno));
 	}
 
-	int timeout = -1;
-
-	if (prg.autoscroll)
-		timeout = 50;
+	int timeout = prg.autoscroll ? 50 : -1;
 
 	while (pollctx.npolls) {
 		int n = poll_fds(&pollctx, timeout);
