@@ -526,13 +526,16 @@ int main(int argc, char *argv[])
 {
 	int opt;
 
-	while ((opt = getopt(argc, argv, "hDO:Av:")) != -1)
+	while ((opt = getopt(argc, argv, "hDO:B:Av:")) != -1)
 		switch (opt) {
 		case 'A':
 			prg.autoscroll = 1;
 			break;
 		case 'D':
 			++debug;
+			break;
+		case 'B':
+			prg.in.input_size = strtoll(optarg, NULL, 0);
 			break;
 		case 'O':
 			prg.in.input_offset = strtoll(optarg, NULL, 0);
