@@ -8,10 +8,13 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <getopt.h>
+#include <sys/stat.h>
 #include <xcb/xcb_keysyms.h>
 #include <X11/keysym.h>
 #include "utils.h"
 #include "rawview.h"
+
+#define DEFAULT_INPUT_BLOCK_SIZE (1024)
 
 struct input
 {
@@ -630,7 +633,7 @@ static struct rawview prg = {
 			.proc = pfd_input_proc,
 		},
 		.input_offset = 0,
-		.input_size = 1024,
+		.input_size = DEFAULT_INPUT_BLOCK_SIZE,
 		.bufsize = sizeof(prg.in.buf),
 	},
 	.title = RAWVIEW,
@@ -683,6 +686,15 @@ int main(int argc, char *argv[])
 		size_t size = strlen(RAWVIEW) + strlen(argv[optind]) + 32;
 		prg.title = malloc(size);
 		snprintf(prg.title, size, "%s: %s: (conti)", RAWVIEW, argv[optind]);
+	}
+	if (prg.in.input_size == 0) { /* -B0 */
+		struct stat st;
+		if (fstat(STDIN_FILENO, &st) == 0)
+			prg.in.input_size = st.st_size;
+		else
+			fprintf(stderr, "rawview: input: %s\n", strerror(errno));
+		if (!prg.in.input_size)
+			prg.in.input_size = DEFAULT_INPUT_BLOCK_SIZE;
 	}
 
 	prg.connection = connect_x_server();
