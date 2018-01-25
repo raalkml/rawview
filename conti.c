@@ -19,7 +19,7 @@ static void reset(struct window *view)
 	memset(conti, 0, sizeof(conti));
 }
 
-static void analyze(struct window *view, uint8_t buf[], size_t count)
+static void analyze_points(struct window *view, uint8_t buf[], size_t count)
 {
 	xcb_point_t pts[BUFSIZ / sizeof(xcb_point_t)];
 	unsigned i, o = 0;
@@ -33,8 +33,8 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 		if (cnt < 255)
 			conti[buf[i - 1]][buf[i]] = ++cnt;
 		clr = view->colors.graph_fg[countof(view->colors.graph_fg) * cnt / 256];
-		pts[o].x = buf[i - 1];
-		pts[o].y = buf[i];
+		pts[o].x = buf[i - 1] * view->graph_area.width / 256;
+		pts[o].y = buf[i] * view->graph_area.height / 256;
 		if (curclr != clr || ++o == countof(pts)) {
 			if (curclr != clr) {
 				curclr = clr;
@@ -49,10 +49,55 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 	}
 }
 
+static void analyze_rects(struct window *view, uint8_t buf[], size_t count)
+{
+	xcb_rectangle_t rts[BUFSIZ / sizeof(xcb_rectangle_t)];
+	unsigned i, o = 0;
+	uint32_t curclr = view->colors.graph_fg[0];
+
+	xcb_change_gc(view->c, view->graph, XCB_GC_FOREGROUND, &curclr);
+	for (i = 1; i < count; ++i) {
+		uint32_t clr;
+		unsigned cnt = conti[buf[i - 1]][buf[i]];
+
+		if (cnt < 255)
+			conti[buf[i - 1]][buf[i]] = ++cnt;
+		clr = view->colors.graph_fg[countof(view->colors.graph_fg) * cnt / 256];
+		rts[o].x = buf[i - 1] * view->graph_area.width / 256;
+		rts[o].y = buf[i] * view->graph_area.height / 256;
+		rts[o].width = view->graph_area.width / 256;
+		rts[o].height = view->graph_area.height / 256;
+		if (curclr != clr || ++o == countof(rts)) {
+			if (curclr != clr) {
+				curclr = clr;
+				xcb_change_gc(view->c, view->graph, XCB_GC_FOREGROUND, &curclr);
+			}
+			xcb_poly_fill_rectangle(view->c, view->graph_pid, view->graph, o, rts);
+			o = 0;
+		}
+	}
+	if (o) {
+		xcb_poly_fill_rectangle(view->c, view->graph_pid, view->graph, o, rts);
+	}
+}
+
+static void analyze(struct window *view, uint8_t buf[], size_t count)
+{
+	if (view->graph_area.width > 256 || view->graph_area.height > 256)
+		analyze_rects(view, buf, count);
+	else
+		analyze_points(view, buf, count);
+}
+
+static void resize(struct window *view)
+{
+}
+
 struct graph_desc conti_graph = {
 	.name = "conti",
 	.width = 256,
 	.height = 256,
 	.reset = reset,
+	.resize = resize,
 	.analyze = analyze,
 };
