@@ -283,6 +283,8 @@ static enum rawview_event do_xcb_events(struct rawview *prg)
 	enum rawview_event ret = RAWVIEW_EV_NOP;
 
 	while ((ev.generic = xcb_poll_for_event(prg->connection))) {
+		unsigned from_server = !(ev.generic->response_type & 0x80);
+
 		if (ev.generic->response_type == 0) {
 			trace_if(0, "X11 error: code %u, seq %u resource %u, opcode %u.%u\n",
 				 ev.error->error_code, ev.error->sequence,
@@ -364,7 +366,7 @@ static enum rawview_event do_xcb_events(struct rawview *prg)
 			break;
 
 		default: 
-			trace("xcb event 0x%x\n", ev.generic->response_type);
+			trace("xcb %sevent 0x%x\n", from_server ? "" : "sent ", ev.generic->response_type);
 			break;
 		}
 		free(ev.generic);
