@@ -26,9 +26,10 @@ struct window
 		uint32_t graph_fg[10];
 		uint32_t graph_bg;
 	} colors;
-	unsigned int font_height;
+	unsigned int font_height, font_base;
 	xcb_rectangle_t status_area;
-	char status_line[100];
+	char status_line1[100];
+	char status_line2[100];
 };
 
 struct well_known_atom

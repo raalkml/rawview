@@ -207,8 +207,11 @@ static struct window *create_rawview_window(struct rawview *prg, const char *ico
 				     (xcb_char2b_t []){ {0,'V'}, {0, 'g'} });
 	text_exts = xcb_query_text_extents_reply(view->c, rq, NULL);
 	view->font_height = 14;
-	if (text_exts)
-		view->font_height = text_exts->font_ascent + text_exts->font_descent;
+	view->font_base = 12;
+	if (text_exts) {
+		view->font_base = text_exts->font_ascent;
+		view->font_height = view->font_base + text_exts->font_descent;
+	}
 	free(text_exts);
 	xcb_close_font(view->c, view->font);
 
@@ -228,6 +231,25 @@ fail:
 	return view;
 }
 
+static void update_status_area(struct window *view)
+{
+	const xcb_point_t line[2] = {
+		{ view->status_area.x, view->status_area.y + view->font_base },
+		{ view->status_area.x + view->status_area.width, view->status_area.y + view->font_base },
+	};
+
+	xcb_change_gc(view->c, view->fg, XCB_GC_FOREGROUND, view->colors.graph_fg);
+	/* draw the baseline of the first line of status text */
+	xcb_poly_line(view->c, XCB_COORD_MODE_ORIGIN, view->w, view->fg, countof(line), line);
+	xcb_poly_rectangle(view->c, view->w, view->fg, 1, &view->status_area);
+	xcb_image_text_8(view->c, strlen(view->status_line1), view->w, view->fg,
+			 view->status_area.x + 1, line[0].y,
+			 view->status_line1);
+	xcb_image_text_8(view->c, strlen(view->status_line2), view->w, view->fg,
+			 view->status_area.x + 1, line[0].y + view->font_height,
+			 view->status_line2);
+}
+
 static void expose_view(struct window *view)
 {
 	unsigned i;
@@ -237,17 +259,7 @@ static void expose_view(struct window *view)
 		      view->graph_area.x, view->graph_area.y,
 		      view->graph_area.width,
 		      view->graph_area.height);
-	xcb_change_gc(view->c, view->fg, XCB_GC_FOREGROUND, view->colors.graph_fg);
-
-	const xcb_point_t line[2] = {
-		{ view->status_area.x, view->status_area.y + view->font_height },
-		{ view->status_area.x + view->status_area.width, view->status_area.y + view->font_height },
-	};
-	/* draw the baseline of the first line of status text */
-	xcb_poly_line(view->c, XCB_COORD_MODE_ORIGIN, view->w, view->fg, countof(line), line);
-	xcb_poly_rectangle(view->c, view->w, view->fg, 1, &view->status_area);
-	xcb_image_text_8(view->c, strlen(view->status_line), view->w, view->fg,
-			 view->status_area.x, line[0].y, view->status_line);
+	update_status_area(view);
 
 	/* rainbow of graph foreground colors */
 	int16_t step = view->graph_area.width / countof(view->colors.graph_fg);
@@ -257,7 +269,7 @@ static void expose_view(struct window *view)
 		step = 1;
 	xcb_rectangle_t rt = {
 		.x = view->graph_area.x,
-		.y = view->graph_area.y + view->graph_area.height + 2,
+		.y = view->graph_area.y + view->graph_area.height + 1,
 		.width = step + rem / 2,
 		.height = 2
 	};
@@ -286,21 +298,20 @@ static ssize_t read_input(struct input *in, struct window *view, size_t count)
 		in->amount += rd;
 	if (rd > 1)
 		prg->graph->analyze(view, in->buf, rd);
-	int len = snprintf(view->status_line, sizeof(view->status_line),
-			   in->amount != in->input_size ?
-			   "%lld (%lu/%lu)" : "%lld (%lu)",
-			   (long long)in->input_offset,
-			   (unsigned long)in->amount,
-			   (unsigned long)in->input_size);
+	snprintf(view->status_line1, sizeof(view->status_line1),
+		 in->amount != in->input_size ?
+		 "0x%llx (%lu/%lu)" : "0x%llx (%lu)",
+		 (long long)in->input_offset,
+		 (unsigned long)in->amount,
+		 (unsigned long)in->input_size);
+	snprintf(view->status_line2, sizeof(view->status_line2),
+		 "%lld", (long long)in->input_offset);
 	xcb_clear_area(view->c, 0, view->w,
 		       view->status_area.x,
 		       view->status_area.y,
 		       view->status_area.width,
 		       view->status_area.height);
-	xcb_change_gc(view->c, view->fg, XCB_GC_FOREGROUND, view->colors.graph_fg);
-	xcb_image_text_8(view->c, len, view->w, view->fg,
-			 view->status_area.x, view->status_area.y + 12,
-			 view->status_line);
+	update_status_area(view);
 	return rd;
 }
 
