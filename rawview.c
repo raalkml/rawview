@@ -657,6 +657,7 @@ static struct rawview prg = {
 
 int main(int argc, char *argv[])
 {
+	struct stat fd_st;
 	int opt;
 
 	while ((opt = getopt(argc, argv, "hDO:B:Av:")) != -1)
@@ -684,12 +685,13 @@ int main(int argc, char *argv[])
 		}
 	if (optind < argc) {
 		int fd = open(argv[optind], O_RDONLY);
+
 		if (fd < 0) {
-			fprintf(stderr, "rawview: %s: %s\n", argv[optind], strerror(errno));
+			fprintf(stderr, "%s: %s: %s\n", RAWVIEW, argv[optind], strerror(errno));
 			exit(2);
 		}
 		if (dup2(fd, STDIN_FILENO) < 0) {
-			fprintf(stderr, "rawview: %s(%d->%d): %s\n", argv[optind],
+			fprintf(stderr, "%s: %s(%d->%d): %s\n", RAWVIEW, argv[optind],
 				fd, STDIN_FILENO, strerror(errno));
 			exit(2);
 		}
@@ -698,12 +700,18 @@ int main(int argc, char *argv[])
 		prg.title = malloc(size);
 		snprintf(prg.title, size, "%s: %s: (conti)", RAWVIEW, argv[optind]);
 	}
+	if (fstat(STDIN_FILENO, &fd_st) == -1) {
+		fprintf(stderr, "%s: %s: %s\n", RAWVIEW,
+			optind < argc ? argv[optind] : "input",
+			strerror(errno));
+		exit(2);
+	}
+	if (S_ISDIR(fd_st.st_mode)) {
+		fprintf(stderr, "%s: input is a directory\n", RAWVIEW);
+		exit(2);
+	}
 	if (prg.in.input_size == 0) { /* -B0 */
-		struct stat st;
-		if (fstat(STDIN_FILENO, &st) == 0)
-			prg.in.input_size = st.st_size;
-		else
-			fprintf(stderr, "rawview: input: %s\n", strerror(errno));
+		prg.in.input_size = fd_st.st_size;
 		if (!prg.in.input_size)
 			prg.in.input_size = DEFAULT_INPUT_BLOCK_SIZE;
 	}
