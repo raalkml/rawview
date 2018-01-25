@@ -8,7 +8,8 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <getopt.h>
-#include <xcb/xcb_ewmh.h>
+#include <xcb/xcb_keysyms.h>
+#include <X11/keysym.h>
 #include "utils.h"
 #include "rawview.h"
 
@@ -25,6 +26,7 @@ struct input
 struct rawview
 {
 	xcb_connection_t *connection;
+	xcb_key_symbols_t *keysyms;
 	struct window *view;
 	struct input in;
 	struct poll_fd pfd;
@@ -262,76 +264,81 @@ enum rawview_event
 	RAWVIEW_EV_RIGHT,
 	RAWVIEW_EV_PLUS,
 	RAWVIEW_EV_MINUS,
-	RAWVIEW_EV_SPACE,
 	RAWVIEW_EV_AUTOSCROLL,
 };
 
-static enum rawview_event do_xcb_events(xcb_connection_t *connection, struct window *view)
+static enum rawview_event do_xcb_events(struct rawview *prg)
 {
 	xcb_generic_event_t *event;
 	unsigned ret = 0;
 
-	while ((event = xcb_poll_for_event(connection))) {
+	while ((event = xcb_poll_for_event(prg->connection))) {
 		switch (event->response_type & ~0x80) {
+			xcb_button_press_event_t *btnev;
+			xcb_key_press_event_t *keyev;
+			xcb_keysym_t key;
+
 		case XCB_EXPOSE:
 			ret = RAWVIEW_EV_EXPOSE;
 			break;
 
 		case XCB_KEY_PRESS:
-		case XCB_KEY_RELEASE:
-			{
-				xcb_key_press_event_t *key = (xcb_key_press_event_t *)event;
-				/* if ((event->response_type & ~0x80) == XCB_KEY_RELEASE &&
-				    (key->detail == 0x1b) {
-					ret = RAWVIEW_EV_RESTART;
-					break;
-				}*/
-				if ((event->response_type & ~0x80) == XCB_KEY_PRESS) {
-					switch (key->detail) {
-					case 0x18 /* Q */:
-					case 0x09 /* Esc */:
-						ret = RAWVIEW_EV_QUIT;
-						break;
-					case 0x26: /* A */
-						ret = RAWVIEW_EV_AUTOSCROLL;
-						break;
-					case 0x41: /* Space */
-						ret = RAWVIEW_EV_SPACE;
-						break;
-					case 0x1b: /* R */
-					case 0x6e: /* Home */
-						ret = RAWVIEW_EV_RESTART;
-						break;
-					case 0x70: /* PgUp */
-					case 0x71: /* Left */
-						ret = RAWVIEW_EV_LEFT;
-						break;
-					case 0x72: /* Right */
-					case 0x75: /* PgDn */
-						ret = RAWVIEW_EV_RIGHT;
-						break;
-					case 0x56: /* KP_Plus */
-						ret = RAWVIEW_EV_PLUS;
-						break;
-					case 0x52: /* KP_Minus */
-						ret = RAWVIEW_EV_MINUS;
-						break;
-					default:
-						goto dump_key;
-					}
-					break;
-				}
-				dump_key:
-				trace("key %s: 0x%02x mod 0x%x\n",
-				      (event->response_type & ~0x80) == XCB_KEY_PRESS ?
-				      "press" : "release",
-				      key->detail, key->state);
+			keyev = (xcb_key_press_event_t *)event;
+			key = xcb_key_symbols_get_keysym(prg->keysyms, keyev->detail, 0);
+
+			switch (key) {
+			case XK_q:
+			case XK_Escape:
+				ret = RAWVIEW_EV_QUIT;
+				break;
+			case XK_a:
+				ret = RAWVIEW_EV_AUTOSCROLL;
+				break;
+			case XK_r:
+			case XK_KP_Home:
+			case XK_Home:
+				ret = RAWVIEW_EV_RESTART;
+				break;
+			case XK_KP_Page_Up:
+			case XK_Page_Up:
+			case XK_Left:
+				ret = RAWVIEW_EV_LEFT;
+				break;
+			case XK_KP_Space:
+			case XK_space:
+			case XK_KP_Page_Down:
+			case XK_Page_Down:
+			case XK_Right:
+				ret = RAWVIEW_EV_RIGHT;
+				break;
+			case XK_KP_Add:
+			case XK_plus:
+				ret = RAWVIEW_EV_PLUS;
+				break;
+			case XK_KP_Subtract:
+			case XK_minus:
+				ret = RAWVIEW_EV_MINUS;
+				break;
+			default:
+				goto dump_key;
 			}
 			break;
+		dump_key:
+			trace("key %s: 0x%02x mod 0x%x keysym 0x%08x\n",
+			      (event->response_type & ~0x80) == XCB_KEY_PRESS ?
+			      "press" : "release",
+			      keyev->detail, keyev->state, key);
+			break;
+
+		case XCB_KEY_RELEASE:
+			keyev = (xcb_key_press_event_t *)event;
+			key = xcb_key_symbols_get_keysym(prg->keysyms, keyev->detail, 0);
+			goto dump_key;
 
 		case XCB_BUTTON_PRESS:
-			{ xcb_button_press_event_t *press = (xcb_button_press_event_t *)event; }
-			trace("xcb event 0x%x\n", event->response_type);
+		case XCB_BUTTON_RELEASE:
+			btnev = (xcb_button_press_event_t *)event;
+			trace("xcb event 0x%x 0x%x\n", btnev->response_type, btnev->detail);
 			break;
 
 		default: 
@@ -395,7 +402,7 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 	if (!(pfd->revents & POLLIN))
 		return;
 
-	switch (do_xcb_events(prg->connection, prg->view)) {
+	switch (do_xcb_events(prg)) {
 		static int exposed;
 
 	case RAWVIEW_EV_QUIT:
@@ -413,7 +420,6 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 		break;
 
 	case RAWVIEW_EV_RIGHT:
-	case RAWVIEW_EV_SPACE:
 		if (!prg->autoscroll)
 			prg->in.input_offset += prg->in.input_size;
 		start_redraw(prg);
@@ -578,6 +584,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Cannot connect to DISPLAY\n");
 		exit(2);
 	}
+	prg.keysyms = xcb_key_symbols_alloc(prg.connection);
 	prg.view = create_rawview_window(&prg, RAWVIEW);
 	if (!prg.view) {
 		fprintf(stderr, "out of memory\n");

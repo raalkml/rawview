@@ -1,5 +1,12 @@
-XCB_LIBS := $(shell pkg-config --libs xcb-atom)
-XCB_CFLAGS := $(shell pkg-config --cflags xcb)
+XCB_LIBS := \
+    $(shell pkg-config --libs xcb-atom) \
+    $(shell pkg-config --libs xcb) \
+    $(shell pkg-config --libs xcb-keysyms) \
+
+XCB_CFLAGS := \
+    $(shell pkg-config --cflags xcb) \
+    $(shell pkg-config --cflags xcb-atom) \
+    $(shell pkg-config --cflags xcb-keysyms) \
 
 CFLAGS = $(XCB_CFLAGS) -Wall -O2 -ggdb
 LDFLAGS = -O2 -ggdb
