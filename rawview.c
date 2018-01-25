@@ -259,6 +259,7 @@ static ssize_t read_input(struct input *in, struct window *view, size_t count)
 
 enum rawview_event
 {
+	RAWVIEW_EV_NOP,
 	RAWVIEW_EV_EXPOSE,
 	RAWVIEW_EV_QUIT,
 	RAWVIEW_EV_RESTART,
@@ -279,7 +280,7 @@ static enum rawview_event do_xcb_events(struct rawview *prg)
 		xcb_unmap_notify_event_t *unmap;
 		xcb_destroy_notify_event_t *destroy;
 	} ev;
-	unsigned ret = 0;
+	enum rawview_event ret = RAWVIEW_EV_NOP;
 
 	while ((ev.generic = xcb_poll_for_event(prg->connection))) {
 		if (ev.generic->response_type == 0) {
@@ -424,6 +425,9 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 
 	switch (do_xcb_events(prg)) {
 		static int exposed;
+
+	case RAWVIEW_EV_NOP:
+		break;
 
 	case RAWVIEW_EV_QUIT:
 		xcb_disconnect(prg->connection);
