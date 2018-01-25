@@ -470,12 +470,6 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 
 	case RAWVIEW_EV_PLUS:
 		prg->in.input_size += 1024;
-		prg->in.amount = 0;
-		if (prg->seekable) {
-			if (lseek(prg->in.pfd.fd, prg->in.input_offset, SEEK_SET) == -1 &&
-			    ESPIPE == errno)
-				prg->seekable = 0;
-		}
 		start_redraw(prg);
 		add_poll(pctx, &prg->in.pfd);
 		break;
