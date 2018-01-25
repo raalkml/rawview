@@ -14,6 +14,9 @@ LOADLIBES = $(XCB_LIBS)
 
 rawview: rawview.o poll-fds.o conti.o bytemap.o
 
+rawview.o poll-fds.o conti.o bytemap.o: rawview.h
+rawview.o poll-fds.o: poll-fds.h
+
 .PHONY: clean
 clean:
 	$(RM) rawview *.o
