@@ -54,7 +54,12 @@ static void analyze_rects(struct window *view, uint8_t buf[], size_t count)
 	xcb_rectangle_t rts[BUFSIZ / sizeof(xcb_rectangle_t)];
 	unsigned i, o = 0;
 	uint32_t curclr = view->colors.graph_fg[0];
+	int16_t w = view->graph_area.width / 256, h = view->graph_area.height / 256;
 
+	if (w < 1)
+		w = 1;
+	if (h < 1)
+		h = 1;
 	xcb_change_gc(view->c, view->graph, XCB_GC_FOREGROUND, &curclr);
 	for (i = 1; i < count; ++i) {
 		uint32_t clr;
@@ -65,8 +70,8 @@ static void analyze_rects(struct window *view, uint8_t buf[], size_t count)
 		clr = view->colors.graph_fg[countof(view->colors.graph_fg) * cnt / 256];
 		rts[o].x = buf[i - 1] * view->graph_area.width / 256;
 		rts[o].y = buf[i] * view->graph_area.height / 256;
-		rts[o].width = view->graph_area.width / 256;
-		rts[o].height = view->graph_area.height / 256;
+		rts[o].width = w + 1;
+		rts[o].height = h + 1;
 		if (curclr != clr || ++o == countof(rts)) {
 			if (curclr != clr) {
 				curclr = clr;
