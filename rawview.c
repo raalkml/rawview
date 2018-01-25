@@ -45,10 +45,11 @@ struct rawview
 static struct rawview prg;
 static int debug;
 
-int trace(const char *fmt, ...)
+#define trace(...) trace_if(1, __VA_ARGS__)
+int trace_if(int level, const char *fmt, ...)
 {
 	int ret = 0;
-	if (debug) {
+	if (debug >= level) {
 		va_list args;
 		va_start(args, fmt);
 		ret = vfprintf(stderr, fmt, args);
