@@ -58,6 +58,33 @@ int trace_if(int level, const char *fmt, ...)
 	return ret;
 }
 
+#define CONTENT_PAD_X (5)
+#define CONTENT_PAD_Y (5)
+#define STATUS_PAD_Y (3)
+#define VIEW_BORDER (2)
+
+static inline uint16_t sub1(uint16_t v, uint16_t d)
+{
+	return v < d ? 1 : v - d;
+}
+
+static void layout_rawview_window(struct window *view,
+				  unsigned graph_width,
+				  unsigned graph_height)
+{
+	/* Graph area layout (xy fixed) */
+	view->graph_area.x = CONTENT_PAD_X;
+	view->graph_area.y = CONTENT_PAD_Y;
+	view->graph_area.width = graph_width;
+	view->graph_area.height = graph_height;
+
+	/* Status area layout (xy flexible) */
+	view->status_area.x = CONTENT_PAD_X;
+	view->status_area.y = view->graph_area.y + view->graph_area.height + STATUS_PAD_Y;
+	view->status_area.width = sub1(view->size.width, 2 * CONTENT_PAD_X);
+	view->status_area.height = sub1(view->size.height, view->status_area.y + CONTENT_PAD_Y);
+}
+
 static const char font_name[] = "fixed";
 
 static struct window *create_rawview_window(struct rawview *prg, const char *icon)
@@ -117,11 +144,11 @@ static struct window *create_rawview_window(struct rawview *prg, const char *ico
 
 	view->size.x = 0;
 	view->size.y = 0;
-	view->size.width = prg->graph->width + 2 * 5 + 2 * 2;
-	view->size.height = prg->graph->height + 2 * 5 + 2 * 2 + prg->status_height;
+	view->size.width = prg->graph->width + 2 * CONTENT_PAD_X;
+	view->size.height = prg->graph->height + 2 * CONTENT_PAD_Y + prg->status_height + STATUS_PAD_Y;
 
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_BORDER_PIXEL | XCB_CW_EVENT_MASK;
-	values[0] = screen->black_pixel;
+	values[0] = view->colors.border;
 	values[1] = view->colors.border;
 	values[2] = XCB_EVENT_MASK_EXPOSURE |
 		XCB_EVENT_MASK_BUTTON_PRESS |
@@ -134,9 +161,9 @@ static struct window *create_rawview_window(struct rawview *prg, const char *ico
 			  screen->root,		/* parent window */
 			  view->size.x, view->size.y,
 			  view->size.width, view->size.height,
-			  2,			/* border_width */
-			  XCB_WINDOW_CLASS_INPUT_OUTPUT, /* class */
-			  screen->root_visual,	/* visual */
+			  VIEW_BORDER,
+			  XCB_WINDOW_CLASS_INPUT_OUTPUT,
+			  screen->root_visual,
 			  mask, values);
 	xcb_change_property(view->c,
 			    XCB_PROP_MODE_REPLACE,
@@ -163,33 +190,37 @@ static struct window *create_rawview_window(struct rawview *prg, const char *ico
 
 	/* Create foreground graphic context */
 	xcb_open_font(view->c, view->font, strlen(font_name), font_name);
-	mask = XCB_GC_FOREGROUND | XCB_GC_FONT | XCB_GC_GRAPHICS_EXPOSURES;
+	mask = XCB_GC_FOREGROUND | XCB_GC_BACKGROUND | XCB_GC_FONT | XCB_GC_GRAPHICS_EXPOSURES;
 	values[0] = screen->white_pixel;
-	values[1] = view->font;
-	values[2] = 0;
+	values[1] = screen->black_pixel;
+	values[2] = view->font;
+	values[3] = 0;
 	xcb_create_gc(view->c, view->fg, view->w, mask, values);
+
+	xcb_query_text_extents_cookie_t rq;
+	xcb_query_text_extents_reply_t *text_exts;
+
+	rq = xcb_query_text_extents (view->c, view->font, 2,
+				     (xcb_char2b_t []){ {0,'V'}, {0, 'g'} });
+	text_exts = xcb_query_text_extents_reply(view->c, rq, NULL);
+	view->font_height = 14;
+	if (text_exts)
+		view->font_height = text_exts->font_ascent + text_exts->font_descent;
+	free(text_exts);
 	xcb_close_font(view->c, view->font);
 
-	/* Graph area configuration */
-	view->graph_area.x = 5;
-	view->graph_area.y = 5;
-	view->graph_area.width = prg->graph->width;
-	view->graph_area.height = prg->graph->height;
+	layout_rawview_window(view, prg->graph->width, prg->graph->height);
+
+	/* graph area off-screen pixmap */
 	xcb_create_pixmap(view->c, screen->root_depth, view->graph_pid, view->w,
 			  view->graph_area.width, view->graph_area.height);
 	/* graph GC */
-	mask = XCB_GC_FOREGROUND |XCB_GC_BACKGROUND | XCB_GC_GRAPHICS_EXPOSURES;
+	mask = XCB_GC_FOREGROUND | XCB_GC_BACKGROUND | XCB_GC_GRAPHICS_EXPOSURES;
 	values[0] = view->colors.graph_fg[0];
 	values[1] = screen->black_pixel;
 	values[2] = 0;
 	xcb_create_gc(view->c, view->graph, view->graph_pid, mask, values);
 	prg->graph->reset(view);
-
-	/* Status area configuration */
-	view->status_area.x = 5;
-	view->status_area.y = view->graph_area.y + view->graph_area.height + 3;
-	view->status_area.width = view->size.width;
-	view->status_area.height = view->size.height - view->status_area.y;
 fail:
 	return view;
 }
@@ -204,14 +235,21 @@ static void expose_view(struct window *view)
 		      view->graph_area.width,
 		      view->graph_area.height);
 	xcb_change_gc(view->c, view->fg, XCB_GC_FOREGROUND, view->colors.graph_fg);
-	xcb_image_text_8(view->c, strlen(view->status_line),
-			 view->w, view->fg,
-			 view->status_area.x,
-			 view->status_area.y + 12 /* FIXME: use baseline offset */,
-			 view->status_line);
 
+	const xcb_point_t line[2] = {
+		{ view->status_area.x, view->status_area.y + view->font_height },
+		{ view->status_area.x + view->status_area.width, view->status_area.y + view->font_height },
+	};
+	/* draw the baseline of the first line of status text */
+	xcb_poly_line(view->c, XCB_COORD_MODE_ORIGIN, view->w, view->fg, countof(line), line);
+	xcb_poly_rectangle(view->c, view->w, view->fg, 1, &view->status_area);
+	xcb_image_text_8(view->c, strlen(view->status_line), view->w, view->fg,
+			 view->status_area.x, line[0].y, view->status_line);
+
+	/* rainbow of graph foreground colors */
 	int16_t step = view->graph_area.width / countof(view->colors.graph_fg);
 	int16_t rem = view->graph_area.width - step * countof(view->colors.graph_fg);
+
 	if (!step)
 		step = 1;
 	xcb_point_t pt[2] = {
@@ -268,6 +306,7 @@ enum rawview_event
 	RAWVIEW_EV_PLUS,
 	RAWVIEW_EV_MINUS,
 	RAWVIEW_EV_AUTOSCROLL,
+	RAWVIEW_EV_RESIZE,
 };
 
 static enum rawview_event do_xcb_events(struct rawview *prg)
@@ -277,6 +316,7 @@ static enum rawview_event do_xcb_events(struct rawview *prg)
 		xcb_generic_error_t *error;
 		xcb_button_press_event_t *btn;
 		xcb_key_press_event_t *key;
+		xcb_configure_notify_event_t *configure;
 		xcb_unmap_notify_event_t *unmap;
 		xcb_destroy_notify_event_t *destroy;
 	} ev;
@@ -303,6 +343,26 @@ static enum rawview_event do_xcb_events(struct rawview *prg)
 		case XCB_DESTROY_NOTIFY:
 			if (ev.destroy->window == prg->view->w)
 				ret = RAWVIEW_EV_QUIT;
+			break;
+
+		case XCB_CONFIGURE_NOTIFY:
+			trace_if(2, "event %02x configure ev %lu wnd %lu above %lu x %d y %d, w %u h %u border %u over %u\n",
+				 ev.configure->response_type,
+				 ev.configure->event,
+				 ev.configure->window,
+				 ev.configure->above_sibling,
+				 ev.configure->x,
+				 ev.configure->y,
+				 ev.configure->width,
+				 ev.configure->height,
+				 ev.configure->border_width,
+				 ev.configure->override_redirect);
+			if (ev.configure->width != prg->view->size.width ||
+			    ev.configure->height != prg->view->size.height) {
+				ret = RAWVIEW_EV_RESIZE;
+				prg->view->size.width = ev.configure->width;
+				prg->view->size.height = ev.configure->height;
+			}
 			break;
 
 		case XCB_EXPOSE:
@@ -417,6 +477,7 @@ static void start_redraw(struct rawview *prg)
 static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 {
 	struct rawview *prg = container_of(pfd, struct rawview, pfd);
+	struct window *view = prg->view;
 
 	if (pfd->revents & (POLLHUP|POLLNVAL)) {
 		remove_poll(pctx, pfd);
@@ -443,6 +504,25 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 			add_poll(pctx, &prg->in.pfd);
 		}
 		expose_view(prg->view);
+		break;
+
+	case RAWVIEW_EV_RESIZE:
+		view->status_area.width = view->size.width - 2 * CONTENT_PAD_Y;
+		if (prg->graph->resize) {
+			xcb_screen_t *screen = xcb_setup_roots_iterator(xcb_get_setup(view->c)).data;
+
+			xcb_free_pixmap(view->c, view->graph_pid);
+			layout_rawview_window(view,
+				sub1(view->size.width, 2 * CONTENT_PAD_X),
+				sub1(view->size.height, STATUS_PAD_Y +
+				     view->status_area.height + 2 * CONTENT_PAD_Y));
+			xcb_create_pixmap(view->c, screen->root_depth, view->graph_pid, view->w,
+					  view->graph_area.width, view->graph_area.height);
+			prg->graph->resize(view);
+			start_redraw(prg);
+			add_poll(pctx, &prg->in.pfd);
+		}
+		expose_view(view);
 		break;
 
 	case RAWVIEW_EV_RIGHT:

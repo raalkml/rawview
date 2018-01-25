@@ -26,6 +26,7 @@ struct window
 		uint32_t graph_fg[10];
 		uint32_t graph_bg;
 	} colors;
+	unsigned int font_height;
 	xcb_rectangle_t status_area;
 	char status_line[100];
 };
@@ -43,6 +44,7 @@ struct graph_desc
 	unsigned int width, height;
 
 	void (*reset)(struct window *);
+	void (*resize)(struct window *);
 	void (*analyze)(struct window *, uint8_t buf[], size_t count);
 };
 

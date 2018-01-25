@@ -69,8 +69,8 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 			clr = view->colors.graph_fg[7];
 			break;
 		}
-		pts[o].x = offset % 256;
-		pts[o].y = offset / 256;
+		pts[o].x = offset % view->graph_area.width;
+		pts[o].y = offset / view->graph_area.width;
 		if (curclr != clr || ++o == countof(pts)) {
 			if (curclr != clr) {
 				curclr = clr;
@@ -80,7 +80,7 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 			o = 0;
 		}
 		++offset;
-		if (offset >= 256 * 256)
+		if (offset >= view->graph_area.width * view->graph_area.height)
 			break;
 	}
 	if (o) {
@@ -88,11 +88,16 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 	}
 }
 
+static void resize(struct window *view)
+{
+}
+
 struct graph_desc bytemap_graph = {
 	.name = "bytemap",
 	.width = 256,
 	.height = 256,
 	.reset = reset,
+	.resize = resize,
 	.analyze = analyze,
 };
 
