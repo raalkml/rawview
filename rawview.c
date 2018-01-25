@@ -679,8 +679,8 @@ int main(int argc, char *argv[])
 		case 'v':
 			if (strcasecmp(optarg, conti_graph.name) == 0)
 				prg.graph = &conti_graph;
-			else if (strcasecmp(optarg, bytemap_graph.name) == 0)
-				prg.graph = &bytemap_graph;
+			else if (strcasecmp(optarg, bytes_graph.name) == 0)
+				prg.graph = &bytes_graph;
 			break;
 		}
 	if (optind < argc) {

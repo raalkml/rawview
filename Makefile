@@ -12,9 +12,9 @@ CFLAGS = $(XCB_CFLAGS) -Wall -O2 -ggdb
 LDFLAGS = -O2 -ggdb
 LOADLIBES = $(XCB_LIBS)
 
-rawview: rawview.o poll-fds.o conti.o bytemap.o
+rawview: rawview.o poll-fds.o conti.o bytes.o
 
-rawview.o poll-fds.o conti.o bytemap.o: rawview.h
+rawview.o poll-fds.o conti.o bytes.o: rawview.h
 rawview.o poll-fds.o: poll-fds.h
 
 .PHONY: clean

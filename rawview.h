@@ -50,7 +50,7 @@ struct graph_desc
 };
 
 extern struct graph_desc conti_graph;
-extern struct graph_desc bytemap_graph;
+extern struct graph_desc bytes_graph;
 
 int trace(const char *fmt, ...);
 

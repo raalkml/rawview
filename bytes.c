@@ -17,6 +17,42 @@ static void reset(struct window *view)
 	offset = 0;
 }
 
+static uint32_t classify(struct window *view, uint8_t byte)
+{
+	switch (byte) {
+	case 0:
+		return view->colors.graph_bg;
+	case '\x20':
+	case '\t': /* white space */
+		return view->colors.graph_fg[0];
+	case 1 ... 8:
+	case 11: // VT
+	case 12: // FF
+	case 14 ... 31: /* control chars */
+		return view->colors.graph_fg[1];
+	case '\r':
+	case '\n':
+		return view->colors.graph_fg[2];
+	case '0' ... '9':
+		return view->colors.graph_fg[3];
+	case 'A' ... 'Z':
+	case 'a' ... 'z':
+	case '_':
+		return view->colors.graph_fg[4];
+	case '!' ... '/':
+	case ':' ... '@':
+	case '[' ... '^':
+	case '`':
+	case '{' ... '~':
+		return view->colors.graph_fg[5];
+	case 127: /* DEL */
+		return view->colors.graph_fg[8];
+	case 128 ... 255:
+		return view->colors.graph_fg[9];
+	}
+	return view->colors.graph_fg[7];
+}
+
 static void analyze(struct window *view, uint8_t buf[], size_t count)
 {
 	xcb_point_t pts[BUFSIZ / sizeof(xcb_point_t)];
@@ -25,50 +61,7 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 
 	xcb_change_gc(view->c, view->graph, XCB_GC_FOREGROUND, &curclr);
 	for (i = 0; i < count; ++i) {
-		uint32_t clr;
-		switch (buf[i]) {
-		case 0:
-			clr = view->colors.graph_bg;
-			break;
-		case '\x20':
-		case '\t': /* white space */
-			clr = view->colors.graph_fg[0];
-			break;
-		case 1 ... 8:
-		case 11: // VT
-		case 12: // FF
-		case 14 ... 31: /* control chars */
-			clr = view->colors.graph_fg[1];
-			break;
-		case '\r':
-		case '\n':
-			clr = view->colors.graph_fg[2];
-			break;
-		case '0' ... '9':
-			clr = view->colors.graph_fg[3];
-			break;
-		case 'A' ... 'Z':
-		case 'a' ... 'z':
-		case '_':
-			clr = view->colors.graph_fg[4];
-			break;
-		case '!' ... '/':
-		case ':' ... '@':
-		case '[' ... '^':
-		case '`':
-		case '{' ... '~':
-			clr = view->colors.graph_fg[5];
-			break;
-		case 127: /* DEL */
-			clr = view->colors.graph_fg[8];
-			break;
-		case 128 ... 255:
-			clr = view->colors.graph_fg[9];
-			break;
-		default:
-			clr = view->colors.graph_fg[7];
-			break;
-		}
+		uint32_t clr = classify(view, buf[i]);
 		pts[o].x = offset % view->graph_area.width;
 		pts[o].y = offset / view->graph_area.width;
 		if (curclr != clr || ++o == countof(pts)) {
@@ -83,17 +76,16 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 		if (offset >= view->graph_area.width * view->graph_area.height)
 			break;
 	}
-	if (o) {
+	if (o)
 		xcb_poly_point(view->c, XCB_COORD_MODE_ORIGIN, view->graph_pid, view->graph, o, pts);
-	}
 }
 
 static void resize(struct window *view)
 {
 }
 
-struct graph_desc bytemap_graph = {
-	.name = "bytemap",
+struct graph_desc bytes_graph = {
+	.name = "bytes",
 	.width = 256,
 	.height = 256,
 	.reset = reset,
