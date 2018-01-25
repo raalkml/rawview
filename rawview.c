@@ -125,7 +125,8 @@ static struct window *create_rawview_window(struct rawview *prg, const char *ico
 	values[2] = XCB_EVENT_MASK_EXPOSURE |
 		XCB_EVENT_MASK_BUTTON_PRESS |
 		XCB_EVENT_MASK_KEY_PRESS    |
-		XCB_EVENT_MASK_KEY_RELEASE;
+		XCB_EVENT_MASK_KEY_RELEASE  |
+		XCB_EVENT_MASK_STRUCTURE_NOTIFY;
 	xcb_create_window(view->c,
 			  XCB_COPY_FROM_PARENT,	/* depth */
 			  view->w,
@@ -269,22 +270,35 @@ enum rawview_event
 
 static enum rawview_event do_xcb_events(struct rawview *prg)
 {
-	xcb_generic_event_t *event;
+	union {
+		xcb_generic_event_t *generic;
+		xcb_button_press_event_t *btn;
+		xcb_key_press_event_t *key;
+		xcb_unmap_notify_event_t *unmap;
+		xcb_destroy_notify_event_t *destroy;
+	} ev;
 	unsigned ret = 0;
 
-	while ((event = xcb_poll_for_event(prg->connection))) {
-		switch (event->response_type & ~0x80) {
-			xcb_button_press_event_t *btnev;
-			xcb_key_press_event_t *keyev;
+	while ((ev.generic = xcb_poll_for_event(prg->connection))) {
+		switch (ev.generic->response_type & ~0x80) {
 			xcb_keysym_t key;
+
+		case XCB_UNMAP_NOTIFY:
+			if (ev.unmap->window == prg->view->w)
+				ret = RAWVIEW_EV_QUIT;
+			break;
+
+		case XCB_DESTROY_NOTIFY:
+			if (ev.destroy->window == prg->view->w)
+				ret = RAWVIEW_EV_QUIT;
+			break;
 
 		case XCB_EXPOSE:
 			ret = RAWVIEW_EV_EXPOSE;
 			break;
 
 		case XCB_KEY_PRESS:
-			keyev = (xcb_key_press_event_t *)event;
-			key = xcb_key_symbols_get_keysym(prg->keysyms, keyev->detail, 0);
+			key = xcb_key_symbols_get_keysym(prg->keysyms, ev.key->detail, 0);
 
 			switch (key) {
 			case XK_q:
@@ -325,28 +339,25 @@ static enum rawview_event do_xcb_events(struct rawview *prg)
 			break;
 		dump_key:
 			trace("key %s: 0x%02x mod 0x%x keysym 0x%08x\n",
-			      (event->response_type & ~0x80) == XCB_KEY_PRESS ?
+			      (ev.key->response_type & ~0x80) == XCB_KEY_PRESS ?
 			      "press" : "release",
-			      keyev->detail, keyev->state, key);
+			      ev.key->detail, ev.key->state, key);
 			break;
 
 		case XCB_KEY_RELEASE:
-			keyev = (xcb_key_press_event_t *)event;
-			key = xcb_key_symbols_get_keysym(prg->keysyms, keyev->detail, 0);
+			key = xcb_key_symbols_get_keysym(prg->keysyms, ev.key->detail, 0);
 			goto dump_key;
 
 		case XCB_BUTTON_PRESS:
 		case XCB_BUTTON_RELEASE:
-			btnev = (xcb_button_press_event_t *)event;
-			trace("xcb event 0x%x 0x%x\n", btnev->response_type, btnev->detail);
+			trace("xcb event 0x%x 0x%x\n", ev.btn->response_type, ev.btn->detail);
 			break;
 
 		default: 
-			trace("xcb event 0x%x\n", event->response_type);
+			trace("xcb event 0x%x\n", ev.generic->response_type);
 			break;
 		}
-
-		free (event);
+		free(ev.generic);
 	}
 	return ret;
 }
