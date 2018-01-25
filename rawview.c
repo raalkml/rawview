@@ -252,18 +252,24 @@ static void expose_view(struct window *view)
 
 	if (!step)
 		step = 1;
-	xcb_point_t pt[2] = {
-		{ view->graph_area.x, view->graph_area.y + view->graph_area.height + 2 },
-		{ view->graph_area.x + step + rem, view->graph_area.y + view->graph_area.height + 2 },
+	xcb_rectangle_t rt = {
+		.x = view->graph_area.x,
+		.y = view->graph_area.y + view->graph_area.height + 2,
+		.width = step + rem / 2,
+		.height = 2
 	};
-	for (i = 0; i < countof(view->colors.graph_fg); ++i) {
+	xcb_change_gc(view->c, view->fg, XCB_GC_FOREGROUND, view->colors.graph_fg);
+	xcb_poly_fill_rectangle(view->c, view->w, view->fg, 1, &rt);
+	rt.width = step;
+	for (i = 1; i < countof(view->colors.graph_fg) - 1; ++i) {
+		rt.x += step;
 		xcb_change_gc(view->c, view->fg, XCB_GC_FOREGROUND, view->colors.graph_fg + i);
-		if (i == countof(view->colors.graph_fg) - 1)
-			pt[1].x = view->graph_area.x + view->graph_area.width;
-		xcb_poly_line(view->c, XCB_COORD_MODE_ORIGIN, view->w, view->fg, countof(pt), pt);
-		pt[0].x += step;
-		pt[1].x += step;
+		xcb_poly_fill_rectangle(view->c, view->w, view->fg, 1, &rt);
 	}
+	xcb_change_gc(view->c, view->fg, XCB_GC_FOREGROUND, view->colors.graph_fg + i);
+	rt.x += step;
+	rt.width = view->status_area.x + view->status_area.width - rt.x + 1;
+	xcb_poly_fill_rectangle(view->c, view->w, view->fg, 1, &rt);
 	xcb_flush(view->c);
 }
 
