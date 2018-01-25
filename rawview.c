@@ -273,6 +273,7 @@ static enum rawview_event do_xcb_events(struct rawview *prg)
 {
 	union {
 		xcb_generic_event_t *generic;
+		xcb_generic_error_t *error;
 		xcb_button_press_event_t *btn;
 		xcb_key_press_event_t *key;
 		xcb_unmap_notify_event_t *unmap;
@@ -281,7 +282,14 @@ static enum rawview_event do_xcb_events(struct rawview *prg)
 	unsigned ret = 0;
 
 	while ((ev.generic = xcb_poll_for_event(prg->connection))) {
-		switch (ev.generic->response_type & ~0x80) {
+		if (ev.generic->response_type == 0) {
+			trace_if(0, "X11 error: code %u, seq %u resource %u, opcode %u.%u\n",
+				 ev.error->error_code, ev.error->sequence,
+				 ev.error->resource_id,
+				 ev.error->major_code, ev.error->minor_code);
+			continue;
+		}
+		switch (ev.generic->response_type & 0x7f) {
 			xcb_keysym_t key;
 
 		case XCB_UNMAP_NOTIFY:
