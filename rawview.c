@@ -16,6 +16,7 @@
 #include "rawview.h"
 
 #define DEFAULT_INPUT_BLOCK_SIZE (1024)
+#define AUTOSCROLL_MS (50)
 
 struct input
 {
@@ -805,14 +806,14 @@ int main(int argc, char *argv[])
 	xcb_map_window(prg.connection, prg.view->w);
 	xcb_flush(prg.connection);
 
-	int timeout = prg.autoscroll ? 50 : -1;
+	int timeout = prg.autoscroll ? AUTOSCROLL_MS : -1;
 
 	while (pollctx.npolls) {
 		int n = poll_fds(&pollctx, timeout);
 		if (prg.pfd.fd == -1) /* quit */
 			break;
 		if (prg.autoscroll)
-			timeout = 50;
+			timeout = AUTOSCROLL_MS;
 		if (n <= 0) {
 			if (prg.autoscroll &&
 			    n == 0 &&
