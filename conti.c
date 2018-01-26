@@ -8,7 +8,7 @@
 
 static uint8_t conti[256][256];
 
-static void start_block(struct window *view)
+static void start_block(struct window *view, off_t offset)
 {
 	uint32_t mask = XCB_GC_FOREGROUND;
 	uint32_t values[] = { view->colors.graph_bg };

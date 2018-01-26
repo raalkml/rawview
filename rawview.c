@@ -99,11 +99,11 @@ static struct window *create_rawview_window(struct rawview *prg, const char *ico
 	uint32_t mask;
 	uint32_t values[5];
 	xcb_connection_t *c = prg->connection;
-	struct window *view = calloc(1, sizeof(*view));
 	unsigned i;
+	struct window *view = calloc(1, sizeof(*view));
 
 	if (!view)
-		goto fail;
+		return NULL;
 
 	/* get the first screen */
 	xcb_screen_t *screen = xcb_setup_roots_iterator(xcb_get_setup(c)).data;
@@ -230,8 +230,6 @@ static struct window *create_rawview_window(struct rawview *prg, const char *ico
 	values[1] = screen->black_pixel;
 	values[2] = 0;
 	xcb_create_gc(view->c, view->graph, view->graph_pid, mask, values);
-	prg->graph->start_block(view);
-fail:
 	return view;
 }
 
@@ -506,7 +504,7 @@ static void start_redraw(struct rawview *prg)
 	if (prg->seekable &&
 	    lseek(prg->in.pfd.fd, prg->in.input_offset, SEEK_SET) == -1 && ESPIPE == errno)
 		prg->seekable = 0;
-	prg->graph->start_block(prg->view);
+	prg->graph->start_block(prg->view, prg->in.input_offset);
 /*	xcb_clear_area(prg->view->c, 1, prg->view->w,
 		       0, 0, prg->view->size.width, prg->view->size.height); */
 }
@@ -784,10 +782,6 @@ int main(int argc, char *argv[])
 		exit(2);
 	}
 
-	/* map the window on the screen */
-	xcb_map_window(prg.connection, prg.view->w);
-	xcb_flush(prg.connection);
-
 	static struct poll_context pollctx = { 0, };
 	prg.pfd.fd = xcb_get_file_descriptor(prg.connection);
 	add_poll(&pollctx, &prg.pfd);
@@ -799,6 +793,11 @@ int main(int argc, char *argv[])
 		prg.seekable = 0;
 		fprintf(stderr, "lseek: %s\n", strerror(errno));
 	}
+	prg.graph->start_block(prg.view, prg.in.input_offset);
+
+	/* map the window on the screen */
+	xcb_map_window(prg.connection, prg.view->w);
+	xcb_flush(prg.connection);
 
 	int timeout = prg.autoscroll ? 50 : -1;
 

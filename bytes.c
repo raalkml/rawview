@@ -6,15 +6,15 @@
 #include "utils.h"
 #include "rawview.h"
 
-static unsigned offset;
+static unsigned blk_offset;
 
-static void start_block(struct window *view)
+static void start_block(struct window *view, off_t off)
 {
 	xcb_rectangle_t rect = { 0, 0, view->graph_area.width, view->graph_area.height };
 
 	xcb_change_gc(view->c, view->graph, XCB_GC_FOREGROUND, &view->colors.graph_bg);
 	xcb_poly_fill_rectangle(view->c, view->graph_pid, view->graph, 1, &rect);
-	offset = 0;
+	blk_offset = 0;
 }
 
 static uint32_t classify(struct window *view, uint8_t byte)
@@ -58,12 +58,15 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 	xcb_point_t pts[BUFSIZ / sizeof(xcb_point_t)];
 	unsigned i, o = 0;
 	uint32_t curclr = view->colors.graph_fg[0];
+	int blkwidth = view->graph_area.width / 2 - 1;
 
+	if (blkwidth < 2)
+		blkwidth = 2;
 	xcb_change_gc(view->c, view->graph, XCB_GC_FOREGROUND, &curclr);
 	for (i = 0; i < count; ++i) {
 		uint32_t clr = classify(view, buf[i]);
-		pts[o].x = offset % view->graph_area.width;
-		pts[o].y = offset / view->graph_area.width;
+		pts[o].x = view->graph_area.width - blk_offset % blkwidth;
+		pts[o].y = blk_offset / blkwidth;
 		if (curclr != clr || ++o == countof(pts)) {
 			if (curclr != clr) {
 				curclr = clr;
@@ -72,8 +75,8 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 			xcb_poly_point(view->c, XCB_COORD_MODE_ORIGIN, view->graph_pid, view->graph, o, pts);
 			o = 0;
 		}
-		++offset;
-		if (offset >= view->graph_area.width * view->graph_area.height)
+		++blk_offset;
+		if (blk_offset >= view->graph_area.width * view->graph_area.height)
 			break;
 	}
 	if (o)

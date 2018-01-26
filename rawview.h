@@ -1,6 +1,7 @@
 #ifndef _RAWVIEW_H_
 #define _RAWVIEW_H_
 
+#include <stdint.h>
 #include <xcb/xcb.h>
 #include <xcb/xcb_atom.h>
 #include "poll-fds.h"
@@ -44,7 +45,7 @@ struct graph_desc
 	const char *name;
 	unsigned int width, height;
 
-	void (*start_block)(struct window *);
+	void (*start_block)(struct window *, off_t offset);
 	void (*resize)(struct window *);
 	void (*analyze)(struct window *, uint8_t buf[], size_t count);
 };
