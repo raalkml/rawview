@@ -567,6 +567,7 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 	case RAWVIEW_EV_QUIT:
 		xcb_disconnect(prg->connection);
 		remove_poll(pctx, pfd);
+		pfd->fd = -1;
 		break;
 
 	case RAWVIEW_EV_EXPOSE:
@@ -808,6 +809,8 @@ int main(int argc, char *argv[])
 
 	while (pollctx.npolls) {
 		int n = poll_fds(&pollctx, timeout);
+		if (prg.pfd.fd == -1) /* quit */
+			break;
 		if (prg.autoscroll)
 			timeout = 50;
 		if (n <= 0) {
