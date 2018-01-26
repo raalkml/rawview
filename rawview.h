@@ -44,7 +44,7 @@ struct graph_desc
 	const char *name;
 	unsigned int width, height;
 
-	void (*reset)(struct window *);
+	void (*start_block)(struct window *);
 	void (*resize)(struct window *);
 	void (*analyze)(struct window *, uint8_t buf[], size_t count);
 };

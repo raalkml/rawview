@@ -8,7 +8,7 @@
 
 static unsigned offset;
 
-static void reset(struct window *view)
+static void start_block(struct window *view)
 {
 	xcb_rectangle_t rect = { 0, 0, view->graph_area.width, view->graph_area.height };
 
@@ -88,7 +88,7 @@ struct graph_desc bytes_graph = {
 	.name = "bytes",
 	.width = 256,
 	.height = 256,
-	.reset = reset,
+	.start_block = start_block,
 	.resize = resize,
 	.analyze = analyze,
 };

@@ -230,7 +230,7 @@ static struct window *create_rawview_window(struct rawview *prg, const char *ico
 	values[1] = screen->black_pixel;
 	values[2] = 0;
 	xcb_create_gc(view->c, view->graph, view->graph_pid, mask, values);
-	prg->graph->reset(view);
+	prg->graph->start_block(view);
 fail:
 	return view;
 }
@@ -506,7 +506,7 @@ static void start_redraw(struct rawview *prg)
 	if (prg->seekable &&
 	    lseek(prg->in.pfd.fd, prg->in.input_offset, SEEK_SET) == -1 && ESPIPE == errno)
 		prg->seekable = 0;
-	prg->graph->reset(prg->view);
+	prg->graph->start_block(prg->view);
 /*	xcb_clear_area(prg->view->c, 1, prg->view->w,
 		       0, 0, prg->view->size.width, prg->view->size.height); */
 }

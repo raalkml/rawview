@@ -8,7 +8,7 @@
 
 static uint8_t conti[256][256];
 
-static void reset(struct window *view)
+static void start_block(struct window *view)
 {
 	uint32_t mask = XCB_GC_FOREGROUND;
 	uint32_t values[] = { view->colors.graph_bg };
@@ -102,7 +102,7 @@ struct graph_desc conti_graph = {
 	.name = "conti",
 	.width = 256,
 	.height = 256,
-	.reset = reset,
+	.start_block = start_block,
 	.resize = resize,
 	.analyze = analyze,
 };
