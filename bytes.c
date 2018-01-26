@@ -24,16 +24,159 @@ static unsigned calc_bytes_per_line(struct window *view, unsigned bw)
 	return bpl;
 }
 
+static unsigned calc_graph_height(unsigned bh, unsigned bpl)
+{
+	return (blk_size / bpl + !!(blk_size % bpl)) * bh;
+}
 
 static void layout(struct window *view)
 {
-	unsigned max_bytes;
+	unsigned max_bytes, height;
 
 	blk_x = view->graph_area.width / 2 + 1;
 	max_bytes = (unsigned)(view->graph_area.width - blk_x) * view->graph_area.height;
 	byte_width = 1;
 	byte_height = 1;
 	bytes_per_line = calc_bytes_per_line(view, byte_width);
+
+	if (blk_size >= max_bytes)
+		return;
+	height = calc_graph_height(byte_height, bytes_per_line);
+	for (;;) {
+		unsigned bw = byte_width + 1;
+		unsigned bh = byte_height + 1;
+		unsigned bpl = calc_bytes_per_line(view, bw);
+		unsigned h = calc_graph_height(bh, bpl);
+
+		trace("%s: bw %u bh %u height %u %s %u\n", __func__,
+		      bw, bh, h,
+		      h < view->graph_area.height ? "<" :
+		      h > view->graph_area.height ? ">" : "==",
+		      view->graph_area.height);
+		if (h > view->graph_area.height)
+			break;
+		height = h;
+		byte_width = bw;
+		byte_height = bh;
+		bytes_per_line = bpl;
+	}
+	if (height >= view->graph_area.height)
+		return;
+	for (;;) {
+		unsigned h = calc_graph_height(byte_height, bytes_per_line - 1);
+
+		trace("%s: bw %u bh %u height %u %s %u\n", __func__,
+		      byte_width, byte_height, h,
+		      h < view->graph_area.height ? "<" :
+		      h > view->graph_area.height ? ">" : "==",
+		      view->graph_area.height);
+		if (h > view->graph_area.height)
+			break;
+		height = h;
+		bytes_per_line--;
+		break;
+	}
+	if (height >= view->graph_area.height)
+		return;
+	for (;;) {
+		unsigned bh = byte_height + 1;
+		unsigned h = calc_graph_height(bh, bytes_per_line);
+
+		trace("%s: bw %u bh %u height %u %s %u\n", __func__,
+		      byte_width, bh, h,
+		      h < view->graph_area.height ? "<" :
+		      h > view->graph_area.height ? ">" : "==",
+		      view->graph_area.height);
+		if (h > view->graph_area.height)
+			break;
+		height = h;
+		byte_height = bh;
+	}
+	if (height >= view->graph_area.height)
+		return;
+	for (;;) {
+		unsigned h = calc_graph_height(byte_height, bytes_per_line - 1);
+
+		trace("%s: bw %u bh %u height %u %s %u\n", __func__,
+		      byte_width, byte_height, h,
+		      h < view->graph_area.height ? "<" :
+		      h > view->graph_area.height ? ">" : "==",
+		      view->graph_area.height);
+		if (h > view->graph_area.height)
+			break;
+		height = h;
+		bytes_per_line--;
+		break;
+	}
+	if (height >= view->graph_area.height)
+		return;
+	for (;;) {
+		unsigned bw = byte_width + 1;
+		unsigned bpl = calc_bytes_per_line(view, bw);
+		unsigned h = calc_graph_height(byte_height, bpl);
+
+		trace("%s: bw %u bh %u height %u %s %u\n", __func__,
+		      bw, byte_height, h,
+		      h < view->graph_area.height ? "<" :
+		      h > view->graph_area.height ? ">" : "==",
+		      view->graph_area.height);
+		if (h > view->graph_area.height)
+			break;
+		height = h;
+		byte_width = bw;
+		bytes_per_line = bpl;
+	}
+	if (height >= view->graph_area.height)
+		return;
+	for (;;) {
+		unsigned h = calc_graph_height(byte_height, bytes_per_line - 1);
+
+		trace("%s: bw %u bh %u height %u %s %u\n", __func__,
+		      byte_width, byte_height, h,
+		      h < view->graph_area.height ? "<" :
+		      h > view->graph_area.height ? ">" : "==",
+		      view->graph_area.height);
+		if (h > view->graph_area.height)
+			break;
+		height = h;
+		bytes_per_line--;
+		break;
+	}
+	if (height >= view->graph_area.height)
+		return;
+	byte_width = 1;
+	byte_height = 1;
+	bytes_per_line = calc_bytes_per_line(view, byte_width);
+	for (;;) {
+		unsigned bh = byte_height + 1;
+		unsigned h = calc_graph_height(bh, bytes_per_line);
+
+		trace("%s: bw %u bh %u height %u %s %u\n", __func__,
+		      byte_width, bh, h,
+		      h < view->graph_area.height ? "<" :
+		      h > view->graph_area.height ? ">" : "==",
+		      view->graph_area.height);
+		if (h > view->graph_area.height)
+			break;
+		height = h;
+		byte_height = bh;
+	}
+	if (height >= view->graph_area.height)
+		return;
+	for (;;) {
+		unsigned h = calc_graph_height(byte_height, bytes_per_line - 1);
+
+		trace("%s: bw %u bh %u height %u %s %u\n", __func__,
+		      byte_width, byte_height, h,
+		      h < view->graph_area.height ? "<" :
+		      h > view->graph_area.height ? ">" : "==",
+		      view->graph_area.height);
+		if (h > view->graph_area.height)
+			break;
+		height = h;
+		bytes_per_line--;
+		break;
+	}
 }
 
 static void start_block(struct window *view, off_t off)
@@ -119,13 +262,13 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 		xcb_poly_fill_rectangle(view->c, view->graph_pid, view->graph, o, rts);
 	/* make the unused part of the graph area visible */
 	xcb_change_gc(view->c, view->graph, XCB_GC_FOREGROUND, view->colors.graph_fg + 6);
-	rect.width = rect.x - view->graph_area.width;
+	rect.width = bytes_per_line * byte_width - (rect.x - blk_x);
 	rect.height = byte_height;
 	if (rect.width)
 		xcb_poly_fill_rectangle(view->c, view->graph_pid, view->graph, 1, &rect);
 	rect.x = blk_x;
 	rect.y += byte_height;
-	rect.width = view->graph_area.width - blk_x;
+	rect.width = bytes_per_line * byte_width;
 	rect.height = view->graph_area.height - rect.y;
 	if (rect.height)
 		xcb_poly_fill_rectangle(view->c, view->graph_pid, view->graph, 1, &rect);
@@ -141,7 +284,7 @@ static void setup(struct window *view, size_t blk)
 struct graph_desc bytes_graph = {
 	.name = "bytes",
 	.width = 256,
-	.height = 256,
+	.height = 512,
 	.start_block = start_block,
 	.setup = setup,
 	.analyze = analyze,
