@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <signal.h>
 #include <getopt.h>
 #include <sys/stat.h>
 #include <xcb/xcb_keysyms.h>
@@ -28,6 +29,8 @@ struct input
 
 struct rawview
 {
+	int argc;
+	char **argv;
 	xcb_connection_t *connection;
 	xcb_key_symbols_t *keysyms;
 	struct window *view;
@@ -45,6 +48,7 @@ struct rawview
 	struct graph_desc *graph;
 };
 
+static char RAWVIEW[] = "rawview";
 static struct rawview prg;
 static int debug;
 
@@ -327,6 +331,8 @@ enum rawview_event
 	RAWVIEW_EV_MINUS,
 	RAWVIEW_EV_AUTOSCROLL,
 	RAWVIEW_EV_RESIZE,
+	RAWVIEW_EV_NEW_CONTI_VIEW,
+	RAWVIEW_EV_NEW_BYTES_VIEW,
 };
 
 static enum rawview_event do_xcb_events(struct rawview *prg)
@@ -425,6 +431,17 @@ static enum rawview_event do_xcb_events(struct rawview *prg)
 			case XK_minus:
 				ret = RAWVIEW_EV_MINUS;
 				break;
+			case XK_c:
+				ret = RAWVIEW_EV_NEW_CONTI_VIEW;
+				break;
+			case XK_b:
+				ret = RAWVIEW_EV_NEW_BYTES_VIEW;
+				break;
+#if 0
+			case XK_x:
+				ret = RAWVIEW_EV_NEW_HEX_VIEW;
+				break;
+#endif
 			default:
 				goto dump_key;
 			}
@@ -492,6 +509,35 @@ static void start_redraw(struct rawview *prg)
 	prg->graph->reset(prg->view);
 /*	xcb_clear_area(prg->view->c, 1, prg->view->w,
 		       0, 0, prg->view->size.width, prg->view->size.height); */
+}
+
+static void rawview_exec_view(struct rawview *prg, const char *view_name)
+{
+	char *argv[] = {
+		prg->argv[0],
+		"-v", NULL,
+		"-O", NULL,
+		"-B", NULL,
+		NULL
+	};
+	char off[16], blk[16];
+	switch (fork()) {
+	case -1:
+		trace_if(0, "%s: %s\n", RAWVIEW, strerror(errno));
+		break;
+	default: /* handled by ignored SIGCHLD */
+		return;
+	case 0:
+		close(xcb_get_file_descriptor(prg->connection));
+		snprintf(off, sizeof(off), "%lld", (long long)prg->in.input_offset);
+		snprintf(blk, sizeof(blk), "%lld", (long long)prg->in.input_size);
+		argv[2] = (char *)view_name;
+		argv[4] = off;
+		argv[6] = blk;
+		execve(argv[0], argv, __environ);
+		trace_if(0, "%s: view %s: %s\n", RAWVIEW, view_name, strerror(errno));
+		_exit(3);
+	}
 }
 
 static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
@@ -600,6 +646,13 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 	case RAWVIEW_EV_AUTOSCROLL:
 		prg->autoscroll = !prg->autoscroll;
 		break;
+
+	case RAWVIEW_EV_NEW_CONTI_VIEW:
+		rawview_exec_view(prg, conti_graph.name);
+		break;
+	case RAWVIEW_EV_NEW_BYTES_VIEW:
+		rawview_exec_view(prg, bytes_graph.name);
+		break;
 	}
 }
 
@@ -631,7 +684,6 @@ static void pfd_input_proc(struct poll_context *pctx, struct poll_fd *pfd)
 	}
 }
 
-static char RAWVIEW[] = "rawview";
 static struct rawview prg = {
 	.pfd = {
 		.events = POLLIN,
@@ -657,6 +709,7 @@ static struct rawview prg = {
 
 int main(int argc, char *argv[])
 {
+	const char *input_name = "*stdin*";
 	struct stat fd_st;
 	int opt;
 
@@ -696,10 +749,11 @@ int main(int argc, char *argv[])
 			exit(2);
 		}
 		close(fd);
-		size_t size = strlen(RAWVIEW) + strlen(argv[optind]) + 32;
-		prg.title = malloc(size);
-		snprintf(prg.title, size, "%s: %s: (conti)", RAWVIEW, argv[optind]);
+		input_name = argv[optind];
 	}
+	size_t size = strlen(RAWVIEW) + strlen(input_name) + 32;
+	prg.title = malloc(size);
+	snprintf(prg.title, size, "%s: %s: (%s)", RAWVIEW, input_name, prg.graph->name);
 	if (fstat(STDIN_FILENO, &fd_st) == -1) {
 		fprintf(stderr, "%s: %s: %s\n", RAWVIEW,
 			optind < argc ? argv[optind] : "input",
@@ -715,7 +769,9 @@ int main(int argc, char *argv[])
 		if (!prg.in.input_size)
 			prg.in.input_size = DEFAULT_INPUT_BLOCK_SIZE;
 	}
-
+	signal(SIGCHLD, SIG_IGN); /* autorip child processes */
+	prg.argc = argc;
+	prg.argv = argv;
 	prg.connection = connect_x_server();
 	if (!prg.connection) {
 		fprintf(stderr, "Cannot connect to DISPLAY\n");
