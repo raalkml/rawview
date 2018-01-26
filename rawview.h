@@ -53,6 +53,12 @@ struct graph_desc
 extern struct graph_desc conti_graph;
 extern struct graph_desc bytes_graph;
 
-int trace(const char *fmt, ...);
+extern char RAWVIEW[];
+
+#define trace(...) trace_if(1, __VA_ARGS__)
+extern int trace_if(int level, const char *fmt, ...);
+
+#define error(fmt, ...) printf_error("%s: " fmt "\n", RAWVIEW, ## __VA_ARGS__)
+extern int printf_error(const char *fmt, ...);
 
 #endif /* _RAWVIEW_H_ */

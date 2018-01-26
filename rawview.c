@@ -48,11 +48,10 @@ struct rawview
 	struct graph_desc *graph;
 };
 
-static char RAWVIEW[] = "rawview";
+char RAWVIEW[] = "rawview";
 static struct rawview prg;
 static int debug;
 
-#define trace(...) trace_if(1, __VA_ARGS__)
 int trace_if(int level, const char *fmt, ...)
 {
 	int ret = 0;
@@ -62,6 +61,15 @@ int trace_if(int level, const char *fmt, ...)
 		ret = vfprintf(stderr, fmt, args);
 		va_end(args);
 	}
+	return ret;
+}
+
+int printf_error(const char *fmt, ...)
+{
+	va_list args;
+	va_start(args, fmt);
+	int ret = vfprintf(stderr, fmt, args);
+	va_end(args);
 	return ret;
 }
 
@@ -350,10 +358,10 @@ static enum rawview_event do_xcb_events(struct rawview *prg)
 		unsigned from_server = !(ev.generic->response_type & 0x80);
 
 		if (ev.generic->response_type == 0) {
-			trace_if(0, "X11 error: code %u, seq %u resource %u, opcode %u.%u\n",
-				 ev.error->error_code, ev.error->sequence,
-				 ev.error->resource_id,
-				 ev.error->major_code, ev.error->minor_code);
+			error("X11 error: code %u, seq %u resource %u, opcode %u.%u",
+			      ev.error->error_code, ev.error->sequence,
+			      ev.error->resource_id,
+			      ev.error->major_code, ev.error->minor_code);
 			continue;
 		}
 		switch (ev.generic->response_type & 0x7f) {
@@ -521,7 +529,7 @@ static void rawview_exec_view(struct rawview *prg, const char *view_name)
 	char off[16], blk[16];
 	switch (fork()) {
 	case -1:
-		trace_if(0, "%s: %s\n", RAWVIEW, strerror(errno));
+		error("%s: %s", view_name, strerror(errno));
 		break;
 	default: /* handled by ignored SIGCHLD */
 		return;
@@ -533,7 +541,7 @@ static void rawview_exec_view(struct rawview *prg, const char *view_name)
 		argv[4] = off;
 		argv[6] = blk;
 		execve(argv[0], argv, __environ);
-		trace_if(0, "%s: view %s: %s\n", RAWVIEW, view_name, strerror(errno));
+		error("view %s: %s", view_name, strerror(errno));
 		_exit(3);
 	}
 }
@@ -738,12 +746,11 @@ int main(int argc, char *argv[])
 		int fd = open(argv[optind], O_RDONLY);
 
 		if (fd < 0) {
-			fprintf(stderr, "%s: %s: %s\n", RAWVIEW, argv[optind], strerror(errno));
+			error("%s: %s", argv[optind], strerror(errno));
 			exit(2);
 		}
 		if (dup2(fd, STDIN_FILENO) < 0) {
-			fprintf(stderr, "%s: %s(%d->%d): %s\n", RAWVIEW, argv[optind],
-				fd, STDIN_FILENO, strerror(errno));
+			error("%s: %s(%d->%d): %s", argv[optind], fd, STDIN_FILENO, strerror(errno));
 			exit(2);
 		}
 		close(fd);
@@ -753,13 +760,11 @@ int main(int argc, char *argv[])
 	prg.title = malloc(size);
 	snprintf(prg.title, size, "%s: %s: (%s)", RAWVIEW, input_name, prg.graph->name);
 	if (fstat(STDIN_FILENO, &fd_st) == -1) {
-		fprintf(stderr, "%s: %s: %s\n", RAWVIEW,
-			optind < argc ? argv[optind] : "input",
-			strerror(errno));
+		error("%s: %s", optind < argc ? argv[optind] : "input", strerror(errno));
 		exit(2);
 	}
 	if (S_ISDIR(fd_st.st_mode)) {
-		fprintf(stderr, "%s: input is a directory\n", RAWVIEW);
+		error("%s: input is a directory", input_name);
 		exit(2);
 	}
 	if (prg.in.input_size == 0) { /* -B0 */
@@ -772,13 +777,13 @@ int main(int argc, char *argv[])
 	prg.argv = argv;
 	prg.connection = connect_x_server();
 	if (!prg.connection) {
-		fprintf(stderr, "Cannot connect to DISPLAY\n");
+		error("cannot connect to DISPLAY");
 		exit(2);
 	}
 	prg.keysyms = xcb_key_symbols_alloc(prg.connection);
 	prg.view = create_rawview_window(&prg, RAWVIEW);
 	if (!prg.view) {
-		fprintf(stderr, "out of memory\n");
+		error("out of memory");
 		exit(2);
 	}
 
@@ -791,7 +796,7 @@ int main(int argc, char *argv[])
 	    lseek(prg.in.pfd.fd, prg.in.input_offset, SEEK_SET) == -1) {
 		prg.in.input_offset = 0;
 		prg.seekable = 0;
-		fprintf(stderr, "lseek: %s\n", strerror(errno));
+		error("seek in %s: %s", input_name, strerror(errno));
 	}
 	prg.graph->start_block(prg.view, prg.in.input_offset);
 
