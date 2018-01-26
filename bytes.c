@@ -58,7 +58,7 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 	xcb_point_t pts[BUFSIZ / sizeof(xcb_point_t)];
 	unsigned i, o = 0;
 	uint32_t curclr = view->colors.graph_fg[0];
-	int blkwidth = view->graph_area.width / 2 - 1;
+	int blkwidth = view->graph_area.width;
 
 	if (blkwidth < 2)
 		blkwidth = 2;
