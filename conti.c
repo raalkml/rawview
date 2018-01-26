@@ -95,10 +95,13 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 		analyze_points(view, buf, count);
 }
 
+static void setup(struct window *view, size_t blk) {}
+
 struct graph_desc conti_graph = {
 	.name = "conti",
 	.width = 256,
 	.height = 256,
+	.setup = setup,
 	.start_block = start_block,
 	.analyze = analyze,
 };
