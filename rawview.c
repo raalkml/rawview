@@ -582,7 +582,7 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 
 	case RAWVIEW_EV_RESIZE:
 		view->status_area.width = view->size.width - 2 * CONTENT_PAD_Y;
-		if (prg->graph->resize) {
+		if (prg->graph->setup) {
 			xcb_screen_t *screen = xcb_setup_roots_iterator(xcb_get_setup(view->c)).data;
 
 			xcb_free_pixmap(view->c, view->graph_pid);
@@ -592,7 +592,7 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 				     view->status_area.height + 2 * CONTENT_PAD_Y));
 			xcb_create_pixmap(view->c, screen->root_depth, view->graph_pid, view->w,
 					  view->graph_area.width, view->graph_area.height);
-			prg->graph->resize(view);
+			prg->graph->setup(view, prg->in.input_size);
 			start_redraw(prg);
 			add_poll(pctx, &prg->in.pfd);
 		}
@@ -624,6 +624,8 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 
 	case RAWVIEW_EV_PLUS:
 		prg->in.input_size += 1024;
+		if (prg->graph->setup)
+			prg->graph->setup(prg->view, prg->in.input_size);
 		start_redraw(prg);
 		add_poll(pctx, &prg->in.pfd);
 		break;
@@ -636,6 +638,8 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 			else
 				prg->in.input_size = 1024;
 			if (prev != prg->in.input_size) {
+				if (prg->graph->setup)
+					prg->graph->setup(prg->view, prg->in.input_size);
 				start_redraw(prg);
 				add_poll(pctx, &prg->in.pfd);
 			}
@@ -800,6 +804,8 @@ int main(int argc, char *argv[])
 		prg.seekable = 0;
 		error("seek in %s: %s", input_name, strerror(errno));
 	}
+	if (prg.graph->setup)
+		prg.graph->setup(prg.view, prg.in.input_size);
 	prg.graph->start_block(prg.view, prg.in.input_offset);
 
 	/* map the window on the screen */

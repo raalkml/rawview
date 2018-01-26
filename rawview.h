@@ -46,7 +46,7 @@ struct graph_desc
 	unsigned int width, height;
 
 	void (*start_block)(struct window *, off_t offset);
-	void (*resize)(struct window *);
+	void (*setup)(struct window *, size_t blk);
 	void (*analyze)(struct window *, uint8_t buf[], size_t count);
 };
 

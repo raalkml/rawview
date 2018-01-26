@@ -6,15 +6,45 @@
 #include "utils.h"
 #include "rawview.h"
 
-static unsigned blk_offset;
+static off_t offset;
+static size_t blk_offset;
+static size_t blk_size;
+
+static unsigned byte_width;
+static unsigned bytes_per_line;
+static unsigned byte_height;
+static int blk_x;
+
+static unsigned calc_bytes_per_line(struct window *view, unsigned bw)
+{
+	unsigned bpl = (unsigned)(view->graph_area.width - blk_x) / bw;
+	unsigned undrawn_line_part = (unsigned)(view->graph_area.width - blk_x) - bpl * bw;
+	if (undrawn_line_part > 4)
+		bpl++;
+	return bpl;
+}
+
+
+static void layout(struct window *view)
+{
+	unsigned max_bytes;
+
+	blk_x = view->graph_area.width / 2 + 1;
+	max_bytes = (unsigned)(view->graph_area.width - blk_x) * view->graph_area.height;
+	byte_width = 1;
+	byte_height = 1;
+	bytes_per_line = calc_bytes_per_line(view, byte_width);
+}
 
 static void start_block(struct window *view, off_t off)
 {
-	xcb_rectangle_t rect = { 0, 0, view->graph_area.width, view->graph_area.height };
-
-	xcb_change_gc(view->c, view->graph, XCB_GC_FOREGROUND, &view->colors.graph_bg);
-	xcb_poly_fill_rectangle(view->c, view->graph_pid, view->graph, 1, &rect);
+	offset = off;
 	blk_offset = 0;
+	xcb_change_gc(view->c, view->graph, XCB_GC_FOREGROUND, &view->colors.graph_bg);
+	xcb_rectangle_t rect = { 0 /* blk_x */, 0, view->graph_area.width /* - blk_x */, view->graph_area.height };
+	xcb_poly_fill_rectangle(view->c, view->graph_pid, view->graph, 1, &rect);
+
+	trace("%s: file off %lld\n", __func__, (long long)off);
 }
 
 static uint32_t classify(struct window *view, uint8_t byte)
@@ -55,37 +85,57 @@ static uint32_t classify(struct window *view, uint8_t byte)
 
 static void analyze(struct window *view, uint8_t buf[], size_t count)
 {
-	xcb_point_t pts[BUFSIZ / sizeof(xcb_point_t)];
-	unsigned i, o = 0;
+	xcb_rectangle_t rect;
+	xcb_rectangle_t rts[BUFSIZ / sizeof(xcb_rectangle_t)];
+	unsigned i, o;
 	uint32_t curclr = view->colors.graph_fg[0];
-	int blkwidth = view->graph_area.width;
 
-	if (blkwidth < 2)
-		blkwidth = 2;
 	xcb_change_gc(view->c, view->graph, XCB_GC_FOREGROUND, &curclr);
-	for (i = 0; i < count; ++i) {
+	for (i = o = 0; i < count; ++i) {
 		uint32_t clr = classify(view, buf[i]);
-		pts[o].x = view->graph_area.width - blk_offset % blkwidth;
-		pts[o].y = blk_offset / blkwidth;
+
+		rts[o].width = byte_width;
+		rts[o].x = blk_x + (blk_offset % bytes_per_line) * byte_width;
+		rts[o].height = byte_height;
+		rts[o].y = (blk_offset / bytes_per_line) * byte_height;
+		rect.x = rts[o].x + rts[o].width;
+		rect.y = rts[o].y;
 		++o;
-		if (curclr != clr || o == countof(pts)) {
+		if (curclr != clr || o == countof(rts)) {
 			if (curclr != clr) {
 				curclr = clr;
 				xcb_change_gc(view->c, view->graph, XCB_GC_FOREGROUND, &curclr);
 			}
-			xcb_poly_point(view->c, XCB_COORD_MODE_ORIGIN, view->graph_pid, view->graph, o, pts);
+			xcb_poly_fill_rectangle(view->c, view->graph_pid, view->graph, o, rts);
 			o = 0;
 		}
 		++blk_offset;
-		if (blk_offset >= view->graph_area.width * view->graph_area.height)
+		if (blk_offset > blk_size) {
+			trace("%s: off %u size %u\n", __func__, blk_offset, blk_size);
 			break;
+		}
 	}
 	if (o)
-		xcb_poly_point(view->c, XCB_COORD_MODE_ORIGIN, view->graph_pid, view->graph, o, pts);
+		xcb_poly_fill_rectangle(view->c, view->graph_pid, view->graph, o, rts);
+	/* make the unused part of the graph area visible */
+	xcb_change_gc(view->c, view->graph, XCB_GC_FOREGROUND, view->colors.graph_fg + 6);
+	rect.width = rect.x - view->graph_area.width;
+	rect.height = byte_height;
+	if (rect.width)
+		xcb_poly_fill_rectangle(view->c, view->graph_pid, view->graph, 1, &rect);
+	rect.x = blk_x;
+	rect.y += byte_height;
+	rect.width = view->graph_area.width - blk_x;
+	rect.height = view->graph_area.height - rect.y;
+	if (rect.height)
+		xcb_poly_fill_rectangle(view->c, view->graph_pid, view->graph, 1, &rect);
 }
 
-static void resize(struct window *view)
+static void setup(struct window *view, size_t blk)
 {
+	blk_size = blk;
+	layout(view);
+	trace("%s: blk %u\n", __func__, blk);
 }
 
 struct graph_desc bytes_graph = {
@@ -93,7 +143,7 @@ struct graph_desc bytes_graph = {
 	.width = 256,
 	.height = 256,
 	.start_block = start_block,
-	.resize = resize,
+	.setup = setup,
 	.analyze = analyze,
 };
 
