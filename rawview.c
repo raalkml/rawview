@@ -311,12 +311,12 @@ static ssize_t read_input(struct input *in, struct window *view, size_t count)
 		prg->graph->analyze(view, in->buf, rd);
 	snprintf(view->status_line1, sizeof(view->status_line1),
 		 in->amount != in->input_size ?
-		 "0x%llx (%lu/%lu)" : "0x%llx (%lu)",
+		 "0x%llx (%lu/%lx)" : "0x%llx (%lx)",
 		 (long long)in->input_offset,
 		 (unsigned long)in->amount,
 		 (unsigned long)in->input_size);
 	snprintf(view->status_line2, sizeof(view->status_line2),
-		 "%lld", (long long)in->input_offset);
+		 "%lld (%lu)", (long long)in->input_offset, (unsigned long)in->input_size);
 	xcb_clear_area(view->c, 0, view->w,
 		       view->status_area.x,
 		       view->status_area.y,
