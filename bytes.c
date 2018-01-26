@@ -67,7 +67,8 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 		uint32_t clr = classify(view, buf[i]);
 		pts[o].x = view->graph_area.width - blk_offset % blkwidth;
 		pts[o].y = blk_offset / blkwidth;
-		if (curclr != clr || ++o == countof(pts)) {
+		++o;
+		if (curclr != clr || o == countof(pts)) {
 			if (curclr != clr) {
 				curclr = clr;
 				xcb_change_gc(view->c, view->graph, XCB_GC_FOREGROUND, &curclr);

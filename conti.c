@@ -35,7 +35,8 @@ static void analyze_points(struct window *view, uint8_t buf[], size_t count)
 		clr = view->colors.graph_fg[countof(view->colors.graph_fg) * cnt / 256];
 		pts[o].x = buf[i - 1] * view->graph_area.width / 256;
 		pts[o].y = buf[i] * view->graph_area.height / 256;
-		if (curclr != clr || ++o == countof(pts)) {
+		++o;
+		if (curclr != clr || o == countof(pts)) {
 			if (curclr != clr) {
 				curclr = clr;
 				xcb_change_gc(view->c, view->graph, XCB_GC_FOREGROUND, &curclr);
