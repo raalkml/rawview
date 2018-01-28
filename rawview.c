@@ -379,7 +379,7 @@ static enum rawview_event do_xcb_events(struct rawview *prg)
 			break;
 
 		case XCB_CONFIGURE_NOTIFY:
-			trace_if(2, "event %02x configure ev %lu wnd %lu above %lu x %d y %d, w %u h %u border %u over %u\n",
+			trace_if(2, "event %02x configure ev %lu wnd %lu above %lu x %d y %d, w %u h %u border %u over %u (was w %u h %u)\n",
 				 ev.configure->response_type,
 				 ev.configure->event,
 				 ev.configure->window,
@@ -389,13 +389,11 @@ static enum rawview_event do_xcb_events(struct rawview *prg)
 				 ev.configure->width,
 				 ev.configure->height,
 				 ev.configure->border_width,
-				 ev.configure->override_redirect);
-			if (ev.configure->width != prg->view->size.width ||
-			    ev.configure->height != prg->view->size.height) {
-				ret = RAWVIEW_EV_RESIZE;
-				prg->view->size.width = ev.configure->width;
-				prg->view->size.height = ev.configure->height;
-			}
+				 ev.configure->override_redirect,
+				 prg->view->size.width, prg->view->size.height);
+			ret = RAWVIEW_EV_RESIZE;
+			prg->view->size.width = ev.configure->width;
+			prg->view->size.height = ev.configure->height;
 			break;
 
 		case XCB_EXPOSE:
