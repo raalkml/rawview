@@ -54,7 +54,7 @@ static void layout(struct window *view)
 	vert_fill = 0;
 	vert_step = 0;
 
-	trace("%s: bw %u bh %u bpr %u blk %u max %u\n", __func__,
+	trace_if(2, "%s: bw %u bh %u bpr %u blk %u max %u\n", __func__,
 	      byte_width, byte_width, bytes_per_row, blk_size, max_bytes);
 	if (blk_size >= max_bytes)
 		return;
@@ -68,7 +68,7 @@ static void layout(struct window *view)
 		unsigned vf = view->graph_area.height - h;
 		unsigned vs = vf / nrows + 1;
 
-		trace("%s: bw %u bh %u bpr %u fill %u a %u rows %u; height %u %s %u\n", __func__,
+		trace_if(2, "%s: bw %u bh %u bpr %u fill %u a %u rows %u; height %u %s %u\n", __func__,
 		      bw, bh, bpr, vf, vs, nrows,
 		      h,
 		      h < view->graph_area.height ? "<" : h > view->graph_area.height ? ">" : "==",
