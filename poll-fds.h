@@ -12,7 +12,7 @@ struct poll_fd
 	void (*proc)(struct poll_context *, struct poll_fd *);
 };
 
-#define MAX_POLL_ELEMENTS (10)
+#define MAX_POLL_ELEMENTS (100)
 struct poll_context
 {
 	unsigned npolls;
