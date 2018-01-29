@@ -15,6 +15,11 @@ static unsigned byte_height;
 static unsigned vert_fill, vert_step;
 static int blk_left, blk_x, blk_y, blk_row, blk_col;
 
+static inline unsigned sub0(unsigned a, unsigned b)
+{
+	return a > b ? a - b : 0;
+}
+
 static unsigned calc_bytes_per_row(struct window *view, unsigned bw)
 {
 	unsigned bpr = (unsigned)(view->graph_area.width - blk_left) / bw;
@@ -49,6 +54,8 @@ static void layout(struct window *view)
 	vert_fill = 0;
 	vert_step = 0;
 
+	trace("%s: bw %u bh %u bpr %u blk %u max %u\n", __func__,
+	      byte_width, byte_width, bytes_per_row, blk_size, max_bytes);
 	if (blk_size >= max_bytes)
 		return;
 	for (;;) {
@@ -83,7 +90,7 @@ static void start_block(struct window *view, off_t off)
 	blk_y = 0;
 	blk_row = 0;
 	blk_col = 0;
-	vert_fill = view->graph_area.height - calc_graph_height(byte_height, bytes_per_row);
+	vert_fill = sub0(view->graph_area.height, calc_graph_height(byte_height, bytes_per_row));
 	vert_step = vert_fill / calc_graph_rows(bytes_per_row) + 1;
 	xcb_change_gc(view->c, view->graph, XCB_GC_FOREGROUND, &view->colors.graph_bg);
 	xcb_rectangle_t rect = { 0 /* blk_left */, 0, view->graph_area.width /* - blk_left */, view->graph_area.height };
@@ -146,8 +153,8 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 	uint32_t curclr = view->colors.graph_fg[0];
 	unsigned row_height = calc_row_height(blk_row);
 
-	/*trace("row %u (%u, %u, vert %u a %u)\n", blk_row,
-	      byte_height, row_height, vert_fill, vert_step);*/
+	trace_if(2,"row %u (bh %u, rh %u, vert %u a %u)\n", blk_row,
+		 byte_height, row_height, vert_fill, vert_step);
 	xcb_change_gc(view->c, view->graph, XCB_GC_FOREGROUND, &curclr);
 
 	for (i = o = 0; i < count; ++i) {
@@ -163,8 +170,8 @@ static void analyze(struct window *view, uint8_t buf[], size_t count)
 			blk_y += row_height;
 			row_height = calc_row_height(++blk_row);
 			blk_col = 0;
-			/*trace("row %u (%u, %u, vert %u a %u)\n", blk_row,
-			      byte_height, row_height, vert_fill, vert_step);*/
+			trace_if(3, "row %u (%u, %u, vert %u a %u)\n", blk_row,
+				 byte_height, row_height, vert_fill, vert_step);
 		}
 		++o;
 		if (curclr != clr || o == countof(rts)) {
