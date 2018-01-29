@@ -32,7 +32,10 @@ struct rawview
 {
 	int argc;
 	char **argv;
-	int cmdfd;
+
+	int cmdout;
+	struct poll_fd cmdin;
+
 	xcb_connection_t *connection;
 	xcb_key_symbols_t *keysyms;
 	struct window *view;
@@ -53,6 +56,7 @@ struct rawview
 enum rawview_cmd
 {
 	RAWVIEW_CMD_NOP,
+	RAWVIEW_CMD_NOTIFY_READ_AT,
 	RAWVIEW_CMD_NEW_CONTI,
 	RAWVIEW_CMD_NEW_BYTES,
 };
@@ -327,7 +331,7 @@ static ssize_t read_input(struct input *in, struct window *view, size_t count)
 	struct rawview *prg = container_of(in, struct rawview, in);
 	ssize_t rd = read(in->pfd.fd, in->buf, count < in->bufsize ? count : in->bufsize);
 
-	trace("%ld %s\n", (long)rd, rd < 0 ? strerror(errno) : "");
+	trace("%s[%ld]: %ld %s\n", __func__, (long)getpid(), (long)rd, rd < 0 ? strerror(errno) : "");
 	if (rd > 0)
 		in->amount += rd;
 	if (rd > 1)
@@ -576,6 +580,16 @@ static void rawview_exec_view(struct rawview *prg, const char *view_name)
 	}
 }
 
+static void notify_read_at(struct rawview *prg)
+{
+	struct rawview_cmd_packet pkt = {
+		.cmd = RAWVIEW_CMD_NOTIFY_READ_AT,
+		.input_offset = prg->in.input_offset,
+		.input_size = prg->in.input_size,
+	};
+	write(prg->cmdout, &pkt, sizeof(pkt));
+}
+
 static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 {
 	struct rawview *prg = container_of(pfd, struct rawview, pfd);
@@ -622,6 +636,7 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 			xcb_create_pixmap(view->c, screen->root_depth, view->graph_pid, view->w,
 					  view->graph_area.width, view->graph_area.height);
 			prg->graph->setup(view, prg->in.input_size);
+			// FIXME redraws too often, for every position change
 			start_redraw(prg);
 			add_poll(pctx, &prg->in.pfd);
 		}
@@ -629,8 +644,10 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 		break;
 
 	case RAWVIEW_EV_RIGHT:
-		if (!prg->autoscroll)
+		if (!prg->autoscroll) {
 			prg->in.input_offset += prg->in.input_size;
+			notify_read_at(prg);
+		}
 		start_redraw(prg);
 		add_poll(pctx, &prg->in.pfd);
 		prg->autoscroll = 0;
@@ -644,6 +661,7 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 			else
 				prg->in.input_offset = 0;
 			if (prev != prg->in.input_offset) {
+				notify_read_at(prg);
 				start_redraw(prg);
 				add_poll(pctx, &prg->in.pfd);
 			}
@@ -655,6 +673,7 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 		prg->in.input_size += 1024;
 		if (prg->graph->setup)
 			prg->graph->setup(prg->view, prg->in.input_size);
+		notify_read_at(prg);
 		start_redraw(prg);
 		add_poll(pctx, &prg->in.pfd);
 		break;
@@ -669,6 +688,7 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 			if (prev != prg->in.input_size) {
 				if (prg->graph->setup)
 					prg->graph->setup(prg->view, prg->in.input_size);
+				notify_read_at(prg);
 				start_redraw(prg);
 				add_poll(pctx, &prg->in.pfd);
 			}
@@ -679,6 +699,7 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 		if (prg->seekable) {
 			prg->autoscroll = 0;
 			prg->in.input_offset = 0;
+			notify_read_at(prg);
 			start_redraw(prg);
 			add_poll(pctx, &prg->in.pfd);
 		}
@@ -695,7 +716,7 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 				.input_offset = prg->in.input_offset,
 				.input_size = prg->in.input_size,
 			};
-			write(prg->cmdfd, &pkt, sizeof(pkt));
+			write(prg->cmdout, &pkt, sizeof(pkt));
 		}
 		break;
 	case RAWVIEW_EV_NEW_CONTI_DETACHED_VIEW:
@@ -708,11 +729,39 @@ static void pfd_xcb_proc(struct poll_context *pctx, struct poll_fd *pfd)
 				.input_offset = prg->in.input_offset,
 				.input_size = prg->in.input_size,
 			};
-			write(prg->cmdfd, &pkt, sizeof(pkt));
+			write(prg->cmdout, &pkt, sizeof(pkt));
 		}
 		break;
 	case RAWVIEW_EV_NEW_BYTES_DETACHED_VIEW:
 		rawview_exec_view(prg, bytes_graph.name);
+		break;
+	}
+}
+
+static void pfd_viewcmd_proc(struct poll_context *pctx, struct poll_fd *pfd)
+{
+	struct rawview_cmd_packet pkt;
+	struct rawview *prg = container_of(pfd, struct rawview, cmdin);
+
+	if (pfd->revents & (POLLHUP|POLLNVAL)) {
+		remove_poll(pctx, pfd);
+		return;
+	}
+	if (!(pfd->revents & POLLIN))
+		return;
+	if (read(pfd->fd, &pkt, sizeof(pkt)) != sizeof(pkt))
+		return;
+	switch (pkt.cmd) {
+	case RAWVIEW_CMD_NOP:
+		break;
+	case RAWVIEW_CMD_NOTIFY_READ_AT:
+		prg->autoscroll = 0;
+		prg->in.input_offset = pkt.input_offset;
+		prg->in.input_size = pkt.input_size;
+		start_redraw(prg);
+		add_poll(pctx, &prg->in.pfd);
+		break;
+	default:
 		break;
 	}
 }
@@ -767,6 +816,8 @@ static int view_loop(struct rawview *prg, const char *input_name)
 
 	prg->pfd.fd = xcb_get_file_descriptor(prg->connection);
 	add_poll(&ctx, &prg->pfd);
+	if (prg->cmdin.fd != -1)
+		add_poll(&ctx, &prg->cmdin);
 
 	if (prg->graph->setup)
 		prg->graph->setup(prg->view, prg->in.input_size);
@@ -790,6 +841,7 @@ static int view_loop(struct rawview *prg, const char *input_name)
 			    n == 0 &&
 			    prg->in.amount >= prg->in.input_size) {
 				prg->in.input_offset += prg->in.input_size;
+				notify_read_at(prg);
 				start_redraw(prg);
 				add_poll(&ctx, &prg->in.pfd);
 			}
@@ -798,22 +850,58 @@ static int view_loop(struct rawview *prg, const char *input_name)
 	return 0;
 }
 
-static int fork_view_loop(struct rawview *prg, int cmdfd[2],
-			  struct graph_desc *gd,
-			  const char *input_name,
-			  off_t input_offset,
-			  size_t input_size)
+struct rawview_client
 {
+	struct rawview *prg;
+	const char *input_name;
+	int out;
+	struct poll_fd in;
+};
+
+static void cmd_input_proc(struct poll_context *pctx, struct poll_fd *pfd);
+
+static struct rawview_client *new_rawview_client(struct rawview *prg,
+						 struct graph_desc *gd,
+						 const char *input_name,
+						 off_t input_offset,
+						 size_t input_size)
+{
+	int cmdout[2];
+	int cmdin[2];
+	struct rawview_client *client = calloc(1, sizeof(*client));
+
+	if (!client)
+		goto fail_alloc;
+	if (pipe(cmdout) == -1)
+		goto fail_alloc;
+	if (pipe(cmdin) == -1)
+		goto fail_in;
 	switch (fork()) {
 	case -1:
 		error("%s: %s", gd->name, strerror(errno));
-		return -1;
-	default: /* handled by ignored SIGCHLD */
-		close(cmdfd[1]);
+		goto fail_fork;
+
+	default:
+		client->prg = prg;
+		client->input_name = input_name;
+		client->out = cmdout[1];
+		set_closexec(client->out);
+		client->in.events = POLLIN;
+		client->in.proc = cmd_input_proc;
+		client->in.fd = cmdin[0];
+		set_closexec(client->in.fd);
+		close(cmdout[0]);
+		close(cmdin[1]);
 		break;
+
 	case 0:
-		close(cmdfd[0]);
-		prg->cmdfd = cmdfd[1];
+		free(client); /* not used here in the client */
+		set_closexec(cmdout[0]);
+		set_closexec(cmdin[1]);
+		close(cmdout[1]);
+		close(cmdin[0]);
+		prg->cmdout = cmdin[1];
+		prg->cmdin.fd = cmdout[0];
 		if (lseek(prg->in.pfd.fd, input_offset, SEEK_SET) == -1) {
 			input_offset = 0;
 			prg->seekable = 0;
@@ -824,42 +912,36 @@ static int fork_view_loop(struct rawview *prg, int cmdfd[2],
 		prg->in.input_size = input_size;
 		_exit(view_loop(prg, input_name));
 	}
-	return 0;
+	return client;
+fail_fork:
+	close(cmdin[0]);
+	close(cmdin[1]);
+fail_in:
+	close(cmdout[0]);
+	close(cmdout[1]);
+fail_alloc:
+	free(client);
+	return NULL;
 }
 
-struct rawview_client
+static void free_rawview_client(struct rawview_client *client)
 {
-	struct rawview *prg;
-	const char *input_name;
-	struct poll_fd pfd;
-};
-
-static void cmd_input_proc(struct poll_context *pctx, struct poll_fd *pfd);
-
-static struct rawview_client *new_rawview_client(struct rawview *prg, int fd, const char *input_name)
-{
-	struct rawview_client *cctx = calloc(1, sizeof(*cctx));
-
-	if (cctx) {
-		cctx->prg = prg;
-		cctx->input_name = input_name;
-		cctx->pfd.fd = fd;
-		cctx->pfd.events = POLLIN;
-		cctx->pfd.proc = cmd_input_proc;
-	}
-	return cctx;
+	if (client->out != -1)
+		close(client->out);
+	if (client->in.fd != -1)
+		close(client->in.fd);
+	free(client);
 }
 
 static void cmd_input_proc(struct poll_context *pctx, struct poll_fd *pfd)
 {
-	int cmdfd[2];
 	struct rawview_cmd_packet pkt;
-	struct rawview_client *cctx = container_of(pfd, struct rawview_client, pfd);
-	struct rawview *prg = cctx->prg;
+	struct rawview_client *client = container_of(pfd, struct rawview_client, in);
+	struct rawview *prg = client->prg;
 
 	if (pfd->revents & (POLLHUP|POLLNVAL)) {
 		remove_poll(pctx, pfd);
-		free(cctx);
+		free_rawview_client(client);
 		return;
 	}
 	if (!(pfd->revents & POLLIN))
@@ -867,61 +949,61 @@ static void cmd_input_proc(struct poll_context *pctx, struct poll_fd *pfd)
 	if (read(pfd->fd, &pkt, sizeof(pkt)) != sizeof(pkt))
 		return;
 	switch (pkt.cmd) {
+		struct rawview_client *newc;
+
 	case RAWVIEW_CMD_NOP:
 		break;
 	case RAWVIEW_CMD_NEW_CONTI:
-		if (pipe(cmdfd) == -1) {
-			error("internal command channel: %s", strerror(errno));
+		if (pctx->npolls == MAX_POLL_ELEMENTS - 1)
 			break;
-		}
-		set_closexec(cmdfd[0]);
-		set_closexec(cmdfd[1]);
-		cctx = new_rawview_client(prg, cmdfd[0], cctx->input_name);
-		if (!cctx)
-			goto fail;
-		if (fork_view_loop(prg, cmdfd, &conti_graph,
-				   cctx->input_name,
-				   pkt.input_offset,
-				   pkt.input_size) == 0)
-			add_poll(pctx, &cctx->pfd);
-		else {
-			free(cctx);
-			goto fail;
-		}
+		newc = new_rawview_client(prg, &conti_graph,
+					  client->input_name,
+					  pkt.input_offset,
+					  pkt.input_size);
+		if (!newc)
+			break;
+		add_poll(pctx, &newc->in);
 		break;
 	case RAWVIEW_CMD_NEW_BYTES:
-		if (pipe(cmdfd) == -1) {
-			error("internal command channel: %s", strerror(errno));
+		if (pctx->npolls == MAX_POLL_ELEMENTS - 1)
 			break;
-		}
-		set_closexec(cmdfd[0]);
-		set_closexec(cmdfd[1]);
-		cctx = new_rawview_client(prg, cmdfd[0], cctx->input_name);
-		if (!cctx)
-			goto fail;
-		if (fork_view_loop(prg, cmdfd, &bytes_graph,
-				   cctx->input_name,
-				   pkt.input_offset,
-				   pkt.input_size) == 0)
-			add_poll(pctx, &cctx->pfd);
-		else {
-			free(cctx);
-			goto fail;
+		newc = new_rawview_client(prg, &bytes_graph,
+					  client->input_name,
+					  pkt.input_offset,
+					  pkt.input_size);
+		if (!newc)
+			break;
+		add_poll(pctx, &newc->in);
+		break;
+	case RAWVIEW_CMD_NOTIFY_READ_AT:
+		trace("read at %lld %u\n", pkt.input_offset, pkt.input_size);
+		{
+			unsigned i;
+			for (i = 0; i < pctx->npolls; ++i) {
+				struct rawview_client *c = container_of(pctx->polls[i], struct rawview_client, in);
+				if (c == client)
+					continue;
+				write(c->out, &pkt, sizeof(pkt));
+			}
 		}
 		break;
 	}
-	return;
-fail:
-	close(cmdfd[0]);
-	close(cmdfd[1]);
 }
 
-static int cmd_loop(int cmdfd, struct rawview *prg, const char *input_name)
+static int cmd_loop(struct rawview *prg, const char *input_name)
 {
 	static struct poll_context ctx = { 0, };
-	struct rawview_client *cctx = new_rawview_client(prg, cmdfd, input_name);
-
-	add_poll(&ctx, &cctx->pfd);
+	struct rawview_client *first = new_rawview_client(prg,
+							  prg->graph,
+							  input_name,
+							  prg->in.input_offset,
+							  prg->in.input_size);
+	if (first)
+		add_poll(&ctx, &first->in);
+	else {
+		error("%s: out of memory", prg->graph->name);
+		return 2;
+	}
 	while (ctx.npolls) {
 		poll_fds(&ctx, -1);
 		if (prg->pfd.fd == -1) /* quit */
@@ -933,7 +1015,12 @@ static int cmd_loop(int cmdfd, struct rawview *prg, const char *input_name)
 int main(int argc, char *argv[])
 {
 	static struct rawview prg = {
-		.cmdfd = -1,
+		.cmdout = -1,
+		.cmdin = {
+			.fd = -1,
+			.events = POLLIN,
+			.proc = pfd_viewcmd_proc,
+		},
 		.pfd = {
 			.events = POLLIN,
 			.proc = pfd_xcb_proc,
@@ -1020,24 +1107,5 @@ int main(int argc, char *argv[])
 	prg.argc = argc;
 	prg.argv = argv;
 
-	int cmdfd[2];
-	if (pipe(cmdfd) == -1) {
-		error("internal command channel: %s", strerror(errno));
-		exit(2);
-	}
-	set_closexec(cmdfd[0]);
-	set_closexec(cmdfd[1]);
-	switch (fork()) {
-	case -1:
-		error("%s", strerror(errno));
-		break;
-	case 0:
-		close(cmdfd[0]);
-		prg.cmdfd = cmdfd[1];
-		return view_loop(&prg, input_name);
-	default:
-		close(cmdfd[1]);
-		return cmd_loop(cmdfd[0], &prg, input_name);
-	}
-	return 2;
+	return cmd_loop(&prg, input_name);
 }
