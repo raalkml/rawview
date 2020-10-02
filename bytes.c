@@ -46,7 +46,7 @@ static void layout(struct window *view)
 {
 	unsigned max_bytes;
 
-	blk_left = view->graph_area.width / 2 + 1;
+	blk_left = 1; // view->graph_area.width / 2 + 1;
 	max_bytes = (unsigned)(view->graph_area.width - blk_left) * view->graph_area.height;
 	byte_width = 1;
 	byte_height = 1;
