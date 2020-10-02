@@ -8,8 +8,8 @@ XCB_CFLAGS := \
     $(shell pkg-config --cflags xcb-atom) \
     $(shell pkg-config --cflags xcb-keysyms) \
 
-CFLAGS = $(XCB_CFLAGS) -Wall -O2 -ggdb
-LDFLAGS = -O2 -ggdb
+CFLAGS = $(XCB_CFLAGS) -Wall -O2 -ggdb -pg -fprofile-arcs -ftest-coverage
+LDFLAGS = -O2 -ggdb -pg -fprofile-arcs -ftest-coverage -lgcov
 LOADLIBES = $(XCB_LIBS)
 
 rawview: rawview.o poll-fds.o conti.o bytes.o
@@ -19,4 +19,4 @@ rawview.o poll-fds.o: poll-fds.h
 
 .PHONY: clean
 clean:
-	$(RM) rawview *.o
+	$(RM) rawview *.o *.gcda
