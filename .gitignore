@@ -2,3 +2,5 @@ rawview
 *.o
 examples/
 xcb
+*.gcno
+gmon.out
