@@ -459,6 +459,7 @@ static enum rawview_event do_xcb_events(struct rawview *prg)
 				break;
 			case XK_KP_Add:
 			case XK_plus:
+			case XK_equal:
 				ret = RAWVIEW_EV_PLUS;
 				break;
 			case XK_KP_Subtract:
